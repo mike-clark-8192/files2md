@@ -15,6 +15,8 @@ class Args:
     output_encoding: str
     include_empty: bool
     mlpf_approx_pct: int
+    autoname_output: bool
+    force: bool
 
     def __setattr__(self, name: str, value: typing.Any) -> None:
         import typing
@@ -46,7 +48,8 @@ def parse(argv: list[str]) -> Args:
     )
     parser.add_argument(
         "out_file",
-        type=type_overwritable_file,
+        type=Path,
+        nargs="?",
         help="Output markdown file.",
     )
     parser.add_argument(
@@ -111,9 +114,29 @@ def parse(argv: list[str]) -> Args:
         dest="verbosity",
         help="Increase verbosity. Repeat for more output.",
     )
+    parser.add_argument(
+        "-O",
+        "--autoname-output",
+        action="store_true",
+        default=False,
+        help="Automatically name the output file.",
+    )
+    parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        default=False,
+        help="Force overwrite output file(s).",
+    )
 
-    args = parser.parse_args(argv, namespace=Args())
+    args: Args = parser.parse_args(argv, namespace=Args())
     args.in_dir = args.in_dir.absolute()
+    if args.out_file is None:
+        if not args.autoname_output:
+            parser.error("required: -O or [out_file]")
+        args.out_file = args.in_dir.joinpath(f"{args.in_dir.name}.md")
+    if not args.force and args.out_file.exists():
+        parser.error(f"{args.out_file} exists. Use -f to overwrite.")
     args.out_file = args.out_file.absolute()
     return args
 

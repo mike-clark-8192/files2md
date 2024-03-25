@@ -52,6 +52,7 @@ def main(argv: list[str] = sys.argv[1:]):
             {
                 "Number of files included": len(files),
                 "Output file size": output_file_size,
+                "Output file": args.out_file,
             },
         )
 

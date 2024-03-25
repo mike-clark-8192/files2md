@@ -7,25 +7,31 @@ from dataclasses import dataclass, field
 import charset_normalizer
 
 import files2md.fileinfo as fileinfo
+import files2md
+import re
 
 TEMPLATE_PROJECT = Template("""# Project: ${project_name}""")
 
 TEMPLATE_FILELIST = Template(
     """## File listing:
-${files}
+${files_listing}
+
+## Filenames and content:
 """
 )
 
 TEMPLATE_FILE = Template(
-    """## `${pathname}`
+    """
+### `${pathname}`
 ${fence}${mdlang}
 ${content}
 ${fence}${omission_msg}
+
 """
 )
 
-TEMPLATE_BINARY = Template(
-    """## `${pathname}`
+TEMPLATE_BINARY_FILE = Template(
+    """### `${pathname}`
 (likely a binary file)"""
 )
 
@@ -34,6 +40,24 @@ TEMPLATE_OMISSION = Template(
 (NB: ${omitted_line_count} lines omitted for brevity)
 """
 )
+
+# In case someone wants to run files2md on files2md itself, we don't want to
+# exclude files2md's own source code by noticing the tag in this source code.
+TEMPLATE_GENERATOR_TAG = Template(
+    " ".join(
+        [
+            "(this",
+            "document",
+            "was",
+            "generated",
+            "by",
+            "files2md",
+            "v${files2md_version}).",
+            "\n",
+        ]
+    )
+)
+
 
 MIN_FENCE_LEN = 3
 MAX_FENCE_LEN = 12
@@ -57,6 +81,7 @@ class MdTransform:
         self.max_lines_per_file = max_lines_per_file
         self.include_empty = include_empty
         self.mlpf_approx_pct = mlpf_approx_pct
+        self.tag_substr = self.make_tag_substr()
         self.summary = TransformSummary()
 
     def make_md(
@@ -76,17 +101,24 @@ class MdTransform:
             self.summary_track_file(file)
 
     def make_header_md(self, project_name: str, pathdescs: Iterable[str]):
+        files_listing = self.make_files_listing(pathdescs)
+        header_parts = [
+            TEMPLATE_PROJECT.substitute(project_name=project_name),
+            TEMPLATE_GENERATOR_TAG.substitute(files2md_version=files2md.__version__),
+            TEMPLATE_FILELIST.substitute(files_listing=files_listing),
+        ]
+        header = "\n".join(header_parts)
+        return header
+
+    def make_files_listing(self, pathdescs):
         files_lines = []
-        header_line = f"""# Project: {project_name}\n"""
-        header_line += f"""## File listing:\n"""
         for pathdesc in pathdescs:
             files_lines.append(f"`{pathdesc}`")
         files_lines_str = "\n".join(files_lines)
-        full_header = f"{header_line}{files_lines_str}\n"
-        return full_header
+        return files_lines_str
 
     def binfile_to_md(self, _file: Path, pathname: str):
-        mdchunk = TEMPLATE_BINARY.substitute(pathname=pathname)
+        mdchunk = TEMPLATE_BINARY_FILE.substitute(pathname=pathname)
         return mdchunk
 
     def fence_for_content(self, content: str):
@@ -120,7 +152,11 @@ class MdTransform:
 
     def exclude_by_content(self, content: str):
         content_without_ws = content.strip()
-        if not content_without_ws and not self.include_empty:
+        content_is_empty = not content_without_ws
+        cfg_exclude_empty = not self.include_empty
+        if content_is_empty and cfg_exclude_empty:
+            return True
+        if self.tag_substr in content:
             return True
         return False
 
@@ -182,3 +218,9 @@ class MdTransform:
         if suffix in fileinfo.FILEEXT_TO_MDLANG:
             return fileinfo.FILEEXT_TO_MDLANG[suffix]
         return fileinfo.FILEEXT_TO_MDLANG.get(suffix.lower(), "")
+
+    def make_tag_substr(self):
+        tpl = TEMPLATE_GENERATOR_TAG.template.strip()
+        spl = re.split(r"(\s+)", tpl)
+        substr = "".join(spl[1:-1])
+        return substr
