@@ -7,6 +7,7 @@ authors = [
 ]
 dependencies = [
     "charset-normalizer>=3.3.2",
+    "pathspec>=0.12.1",
 ]
 requires-python = ">=3.11"
 readme = "README.md"
@@ -21,3 +22,7 @@ files2md = "files2md.cli:main"
 
 [tool.pdm]
 distribution = true
+
+[tool.pdm.dev-dependencies]
+dev = [
+]

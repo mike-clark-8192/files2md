@@ -17,23 +17,22 @@ install directly from a Git repository:
 pip install git+https://github.com/mike-clark-8192/files2md.git
 ```
 
-## Usage
-
-To use `files2md`, navigate to the directory containing your project and run:
+## Basic Usage
 
 ```sh
-cd files2md
-python3 -m files2md.cli [InputDirectory] [OutputMarkdownFile.md]
+python3 -m files2md.cli [InputDirectory] [OutputFile.md]
 ```
 
 ## Features
 
 - Recursive directory traversal.
-- Converts file contents to Markdown code blocks with syntax highlighting based on file extension.
-- Excludes binary files and common directories like `.git` and `node_modules`.
+- Converts file contents to Markdown code blocks with language hint based on file extension.
+- Uses gitignore-style include/exclude [patterns](https://github.com/cpburnz/python-pathspec).
 - Detects file encodings and converts to UTF-8.
-- Excludes files that often contain sensitive data (`.env` and `.envrc`). (!)
-(!) If this is a concern, please review the output to ensure that no sensitive data is included.
+- Detects and excludes binary files.
+- Excludes common directories like `.git` and `node_modules`.
+- Excludes files that often contain sensitive data (`.env` and `.envrc`). (!)   
+  (!) If this is a concern, please review the output to ensure that no sensitive data is included.
 
 ## Wishlist / TODOs
 
@@ -41,7 +40,34 @@ python3 -m files2md.cli [InputDirectory] [OutputMarkdownFile.md]
 * Add configuration options for including/excluding specific file types or directories.
 * Improve handling of large files (e.g., truncation options).
 * Add support for honoring `.gitignore` files.
-* Warn about potentially sensitive data.
+* Warn about / detect potentially sensitive data.
+* Add something like --continue-on-read-error
+
+## Usage
+
+```
+Convert file structure to markdown.
+
+positional arguments:
+  in_dir                Input directory.
+  out_file              Output markdown file.
+
+options:
+  -h, --help            show this help message and exit
+  -g GLOB [GLOB ...], --glob-patterns GLOB [GLOB ...]
+                        Wildmatch patterns to include files and directories. (default: [])
+  -x GLOB [GLOB ...], --exclude-patterns GLOB [GLOB ...]
+                        Wildmatch patterns to exclude files and directories. (default: [])
+  -l N, --max-lines-per-file N
+                        Maximum number of lines to read from each file. 0 = no limit. (default: 0)
+  --mlpf-approx-pct N   Read N% extra lines if doing so would avoid truncation of a file. (default: 25)
+  --include-empty       Include empty files in the output. (default: False)
+  -D, --no-default-patterns
+                        Turn off built-in include/exclude patterns. (default: True)
+  --output-encoding ENCODING
+                        Output file encoding. (default: utf-8)
+  -v, --verbose         Increase verbosity. (default: 0)
+```
 
 ## License
 
