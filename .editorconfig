@@ -1,0 +1,20 @@
+root = true
+
+[*]
+end_of_line = lf
+
+[*.{md}]
+insert_final_newline = true
+trim_trailing_whitespace = false
+
+[*.{py,toml}]
+charset = utf-8
+indent_size = 4
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[.editorconfig]
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
