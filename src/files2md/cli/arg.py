@@ -109,7 +109,7 @@ def parse(argv: list[str]) -> Args:
         action="count",
         default=0,
         dest="verbosity",
-        help="Increase verbosity.",
+        help="Increase verbosity. Repeat for more output.",
     )
 
     args = parser.parse_args(argv, namespace=Args())
