@@ -134,7 +134,7 @@ def parse(argv: list[str]) -> Args:
     if args.out_file is None:
         if not args.autoname_output:
             parser.error("required: -O or [out_file]")
-        args.out_file = args.in_dir.joinpath(f"{args.in_dir.name}.md")
+        args.out_file = Path(f"{args.in_dir.name}.md").absolute()
     if not args.force and args.out_file.exists():
         parser.error(f"{args.out_file} exists. Use -f to overwrite.")
     args.out_file = args.out_file.absolute()

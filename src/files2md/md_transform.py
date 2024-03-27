@@ -1,4 +1,5 @@
 import io
+import mimetypes
 from pathlib import Path
 from string import Template
 from typing import Iterable
@@ -34,6 +35,12 @@ TEMPLATE_BINARY_FILE = Template(
     """### `${pathname}`
 (likely a binary file)"""
 )
+
+TEMPLATE_UNSUPPORTED_MIMETYPE = Template(
+    """### `${pathname}`
+(content excluded due to unsupported MIME type: ${mimetype})"""
+)
+
 
 TEMPLATE_OMISSION = Template(
     """
@@ -94,7 +101,10 @@ class MdTransform:
         path_descs = {file: self.describe_path(file, indir) for file in files}
         header = self.make_header_md(project_name, path_descs.values())
         ofh.write(header)
+        ofh_path = Path(getattr(ofh, "name", ""))
         for file in sorted(files):
+            if ofh_path.samefile(file):
+                continue
             pathdesc = path_descs[file]
             mdstr = self.file_to_md(file, pathdesc)
             ofh.write(mdstr)
@@ -183,13 +193,33 @@ class MdTransform:
         return lines, omitted_lines
 
     def file_to_md(self, file: Path, pathname: str):
+        if self.exclude_by_mime(file):
+            return TEMPLATE_UNSUPPORTED_MIMETYPE.substitute(
+                pathname=pathname,
+                mimetype=self.guess_mime_type(file),
+            )
         encoding = self.detect_encoding(file)
         if encoding == "binary":
             return self.binfile_to_md(file, pathname)
         return self.textfile_to_md(file, pathname, encoding)
 
+    def guess_mime_type(self, file: Path):
+        mimetype, _ = mimetypes.guess_type(file)
+        if not mimetype:
+            return ""
+        return mimetype
+
+    def exclude_by_mime(self, file: Path):
+        mimetype = self.guess_mime_type(file)
+        if mimetype in fileinfo.OK_MIMETYPES:
+            return False
+        supertype = mimetype.split("/")[0]
+        if supertype in fileinfo.IGNORE_MIME_SUPERTYPES:
+            return True
+        return False
+
     def describe_path(self, path: Path, base: Path) -> str:
-        relpath = path.resolve().relative_to(base.parent)
+        relpath = path.resolve().relative_to(base)
         return str(relpath.as_posix())
 
     def detect_encoding(self, file_path: Path, *, max_bytes: int = 100_000):
@@ -222,5 +252,5 @@ class MdTransform:
     def make_tag_substr(self):
         tpl = TEMPLATE_GENERATOR_TAG.template.strip()
         spl = re.split(r"(\s+)", tpl)
-        substr = "".join(spl[1:-1])
+        substr = "".join(spl[1:-1]).strip()
         return substr

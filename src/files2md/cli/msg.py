@@ -20,7 +20,9 @@ class VPrinter(contextlib.AbstractContextManager):
         if verbosity > self.verbosity:
             return
         print(f" ⮦ {title} ⮧ ".center(78, "-"))
-        if isinstance(items, dict):
+        if isinstance(items, str):
+            print(items)
+        elif isinstance(items, dict):
             for k, v in items.items():
                 print(f"{k}: {v}")
         elif isinstance(items, Iterable):

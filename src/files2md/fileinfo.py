@@ -1,5 +1,5 @@
 DEFAULT_PATTERNS = [
-    # exclude files (and dirs)
+    # exclude text files
     "!.env",
     "!.envrc",
     "!pdm.lock",
@@ -44,6 +44,32 @@ DEFAULT_PATTERNS = [
     "!.pdm-build/",
     "!.github/",
     "!.*cache*/",
+]
+
+IGNORE_MIME_SUPERTYPES = [
+    "application",
+    "audio",
+    "font",
+    "image",
+    "video",
+]
+
+# overrides IGNORE_MIME_SUPERTYPES
+OK_MIMETYPES = [
+    "application/json",
+    "application/manifest+json",
+    "application/postscript",
+    "application/vnd.adobe.xdp+xml",
+    "application/xml",
+    "application/xaml+xml",
+    "application/opensearchdescription+xml",
+    "application/javascript",
+    "application/xhtml+xml",
+    "Application/xml",
+    "application/xml-dtd",
+    "application/xslt+xml",
+    "application/x-javascript",
+    "string",
 ]
 
 FILEEXT_TO_MDLANG = {

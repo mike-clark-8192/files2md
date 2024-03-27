@@ -1,26 +1,28 @@
 # files2md
 
-`files2md` is a Python utility designed to convert a directory of files into a
+`files2md` is a Python library and CLI tool that converts a directory of files into a
 single Markdown document. This tool could be useful for sharing project structures
 and contents with others.
 
 You might find it particularly useful as a way to share a project with an AI
 Chat Assistant like ChatGPT, Google Gemini, or GitHub Copilot.
 
-## Installation
+## Installation and basic usage
 
 Currently, `files2md` does not support direct installation from PyPI. To use
 the tool, either clone it and run it directly, or use pip's ability to
-install directly from a Git repository:
+install directly from a Git repository.
 
+### via pip or [pipx](https://pipx.pypa.io/stable/)
 ```sh
 pip install git+https://github.com/mike-clark-8192/files2md.git
+files2md InputDir OutputFile.md
 ```
 
-## Basic Usage
-
+### via git clone
 ```sh
-python3 -m files2md.cli [InputDirectory] [OutputFile.md]
+git clone https://github.com/mike-clark-8192/files2md && cd files2md
+python3 -m files2md.cli InputDir OutputFile.md
 ```
 
 ## Features
@@ -43,14 +45,15 @@ python3 -m files2md.cli [InputDirectory] [OutputFile.md]
 * Warn about / detect potentially sensitive data.
 * Add something like --continue-on-read-error
 
-## Usage
+## Full usage (--help)
 
 ```
 Convert file structure to markdown.
 
+
 positional arguments:
   in_dir                Input directory.
-  out_file              Output markdown file.
+  out_file              Output markdown file. (default: None)
 
 options:
   -h, --help            show this help message and exit
@@ -66,7 +69,10 @@ options:
                         Turn off built-in include/exclude patterns. (default: True)
   --output-encoding ENCODING
                         Output file encoding. (default: utf-8)
-  -v, --verbose         Increase verbosity. (default: 0)
+  -v, --verbose         Increase verbosity. Repeat for more output. (default: 0)
+  -O, --autoname-output
+                        Automatically name the output file. (default: False)
+  -f, --force           Force overwrite output file(s). (default: False)
 ```
 
 ## License

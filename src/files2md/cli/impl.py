@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from typing import Iterable
 
 import pathspec
 
@@ -24,6 +25,11 @@ def collect_paths(
     return [Path(x) for x in spec.match_tree(".")], patterns
 
 
+def file_sizes_and_names(lst: Iterable[Path]):
+    for item in sorted(lst, key=lambda x: x.stat().st_size):
+        yield f"{item.stat().st_size:10,} {item}"
+
+
 def main(argv: list[str] = sys.argv[1:]):
     args = arg.parse(argv)
     os.chdir(args.in_dir)
@@ -42,10 +48,11 @@ def main(argv: list[str] = sys.argv[1:]):
 
     output_file_size = args.out_file.stat().st_size
     with msg.VPrinter(args.verbosity) as vprint:
+        summary = mdtr.summary
         vprint.section(2, "arguments", vars(args))
         vprint.section(3, "applied-patterns", applied_patterns)
-        vprint.section(3, "file-count-by-suffix", mdtr.summary.suffix_to_file_count)
-        vprint.section(4, "files", mdtr.summary.included_files, "\n")
+        vprint.section(3, "file-count-by-suffix", summary.suffix_to_file_count)
+        vprint.section(4, "files", file_sizes_and_names(summary.included_files), "\n")
         vprint.section(
             1,
             "summary",
