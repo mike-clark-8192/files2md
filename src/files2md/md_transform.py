@@ -1,15 +1,21 @@
 import io
 import mimetypes
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from string import Template
+from types import ModuleType
 from typing import Iterable
-from dataclasses import dataclass, field
 
-import charset_normalizer
-
-import files2md.fileinfo as fileinfo
 import files2md
-import re
+import files2md.fileinfo as fileinfo
+
+try:
+    import charset_normalizer as charset_normalizer_
+
+    charset_normalizer = charset_normalizer_
+except ImportError:
+    charset_normalizer = None  # type: ignore
 
 TEMPLATE_PROJECT = Template("""# Project: ${project_name}""")
 
@@ -72,9 +78,16 @@ MAX_FENCE_LEN = 12
 
 @dataclass(kw_only=True)
 class TransformSummary:
+    # files that were truncated due to max_lines_per_file
     truncated_files: list[Path] = field(default_factory=list)
+    # count of included files by suffix
     suffix_to_file_count: dict[str, int] = field(default_factory=dict)
+    # list of included files
     included_files: list[Path] = field(default_factory=list)
+    # char count of included files
+    files_to_char_count: dict[Path, int] = field(default_factory=dict)
+    # files that will be listed in the Markdown but have their content excluded (e.g. binary files)
+    content_excluded_files: dict[Path, bool] = field(default_factory=dict)
 
 
 class MdTransform:
@@ -89,6 +102,7 @@ class MdTransform:
         self.include_empty = include_empty
         self.mlpf_approx_pct = mlpf_approx_pct
         self.tag_substr = self.make_tag_substr()
+        self.total_chars_written = 0
         self.summary = TransformSummary()
 
     def make_md(
@@ -106,9 +120,10 @@ class MdTransform:
             if ofh_path.samefile(file):
                 continue
             pathdesc = path_descs[file]
-            mdstr = self.file_to_md(file, pathdesc)
+            mdstr, content_excluded = self.file_to_md(file, pathdesc)
             ofh.write(mdstr)
-            self.summary_track_file(file)
+            self.summary_track_file(file, mdstr, content_excluded)
+            self.total_chars_written += len(mdstr)
 
     def make_header_md(self, project_name: str, pathdescs: Iterable[str]):
         files_listing = self.make_files_listing(pathdescs)
@@ -192,16 +207,27 @@ class MdTransform:
                 omitted_lines = []
         return lines, omitted_lines
 
-    def file_to_md(self, file: Path, pathname: str):
+    def file_to_md(self, file: Path, pathname: str) -> tuple[str, bool]:
+        """
+        Returns a tuple of (mdchunk, content_excluded)
+
+        mdchunk: str
+            The markdown content for the file
+        content_excluded: bool
+            True if the content was excluded, False otherwise
+        """
         if self.exclude_by_mime(file):
-            return TEMPLATE_UNSUPPORTED_MIMETYPE.substitute(
-                pathname=pathname,
-                mimetype=self.guess_mime_type(file),
+            return (
+                TEMPLATE_UNSUPPORTED_MIMETYPE.substitute(
+                    pathname=pathname,
+                    mimetype=self.guess_mime_type(file),
+                ),
+                True,
             )
         encoding = self.detect_encoding(file)
         if encoding == "binary":
-            return self.binfile_to_md(file, pathname)
-        return self.textfile_to_md(file, pathname, encoding)
+            return self.binfile_to_md(file, pathname), True
+        return self.textfile_to_md(file, pathname, encoding), False
 
     def guess_mime_type(self, file: Path):
         mimetype, _ = mimetypes.guess_type(file)
@@ -223,6 +249,8 @@ class MdTransform:
         return str(relpath.as_posix())
 
     def detect_encoding(self, file_path: Path, *, max_bytes: int = 100_000):
+        if not charset_normalizer:
+            return "utf-8"
         with open(file_path, "rb") as file:
             blob = file.read(max_bytes)
             matches = charset_normalizer.from_bytes(blob)
@@ -233,13 +261,16 @@ class MdTransform:
                 return "binary"
             return best.encoding
 
-    def summary_track_file(self, file: Path):
+    def summary_track_file(self, file: Path, content: str, content_excluded: bool):
         ext = file.suffix
         if not ext:
             ext = file.name
-        suf2fc = self.summary.suffix_to_file_count
-        suf2fc[ext] = suf2fc.get(ext, 0) + 1
+        suffix2count = self.summary.suffix_to_file_count
+        suffix2count[ext] = suffix2count.get(ext, 0) + 1
         self.summary.included_files.append(file)
+        if content_excluded:
+            self.summary.content_excluded_files[file] = True
+        self.summary.files_to_char_count[file] = len(content)
 
     def guess_md_lang(self, file_path: Path, _content: str):
         suffix = file_path.suffix

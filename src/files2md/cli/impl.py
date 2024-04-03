@@ -6,7 +6,7 @@ from typing import Iterable
 
 import pathspec
 
-from .. import fileinfo, md_transform
+from files2md import fileinfo, md_transform
 from . import arg, msg
 
 
@@ -25,9 +25,13 @@ def collect_paths(
     return [Path(x) for x in spec.match_tree(".")], patterns
 
 
-def file_sizes_and_names(lst: Iterable[Path]):
-    for item in sorted(lst, key=lambda x: x.stat().st_size):
-        yield f"{item.stat().st_size:10,} {item}"
+def file_sizes_and_names(summary: md_transform.TransformSummary) -> Iterable[str]:
+    lst = summary.included_files
+    sizes = summary.files_to_char_count
+    for item in sorted(lst, key=lambda x: sizes[x]):
+        x = "x" if item in summary.content_excluded_files else " "
+        size = sizes.get(item, -1)
+        yield f"{x} {size:10,} chars: {item}"
 
 
 def main(argv: list[str] = sys.argv[1:]):
@@ -39,20 +43,20 @@ def main(argv: list[str] = sys.argv[1:]):
     project_name = args.in_dir.name
 
     with open(args.out_file, "w", encoding=args.output_encoding) as ofh:
-        mdtr = md_transform.MdTransform(
+        transform = md_transform.MdTransform(
             max_lines_per_file=args.max_lines_per_file,
             include_empty=args.include_empty,
             mlpf_approx_pct=args.mlpf_approx_pct,
         )
-        mdtr.make_md(project_name, args.in_dir, files, ofh)
+        transform.make_md(project_name, args.in_dir, files, ofh)
 
     output_file_size = args.out_file.stat().st_size
     with msg.VPrinter(args.verbosity) as vprint:
-        summary = mdtr.summary
+        summary = transform.summary
         vprint.section(2, "arguments", vars(args))
         vprint.section(3, "applied-patterns", applied_patterns)
         vprint.section(3, "file-count-by-suffix", summary.suffix_to_file_count)
-        vprint.section(4, "files", file_sizes_and_names(summary.included_files), "\n")
+        vprint.section(4, "files", file_sizes_and_names(summary), "\n")
         vprint.section(
             1,
             "summary",

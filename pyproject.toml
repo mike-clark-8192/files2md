@@ -1,28 +1,30 @@
 [project]
 name = "files2md"
-version = "0.1.0"
+version = "1.0.2"
 description = "Create markdown from a collection of files."
-authors = [
-    {name = "Mike Clark", email = "mike.clark.8192@gmail.com"},
-]
+authors = [{ name = "Mike Clark", email = "mike.clark.8192@gmail.com" }]
 dependencies = [
-    "charset-normalizer>=3.3.2",
     "pathspec>=0.12.1",
+    # "setuptools>=69.2.0",
+    # "wheel>=0.43.0",
 ]
 requires-python = ">=3.11"
 readme = "README.md"
-license = {text = "MIT"}
+license = { text = "MIT" }
+
+[project.optional-dependencies]
+extras = ["charset-normalizer>=3.3.2"]
+
 
 [build-system]
-requires = ["pdm-backend"]
-build-backend = "pdm.backend"
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project.scripts]
-files2md = "files2md.cli:main"
+files2md = "files2md.cli.__main__:main"
 
 [tool.pdm]
 distribution = true
 
 [tool.pdm.dev-dependencies]
-dev = [
-]
+dev = []
