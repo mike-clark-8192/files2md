@@ -21,10 +21,10 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
-files2md = "files2md.cli.__main__:main"
+files2md = "files2md.cli:main"
 
 [tool.pdm]
 distribution = true
 
 [tool.pdm.dev-dependencies]
-dev = []
+dev = ["debugpy>=1.8.1"]

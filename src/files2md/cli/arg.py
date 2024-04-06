@@ -17,6 +17,7 @@ class Args:
     mlpf_approx_pct: int
     autoname_output: bool
     force: bool
+    output_extension: str
 
     def __setattr__(self, name: str, value: typing.Any) -> None:
         import typing
@@ -128,13 +129,22 @@ def parse(argv: list[str]) -> Args:
         default=False,
         help="Force overwrite output file(s).",
     )
+    parser.add_argument(
+        "--output-extension",
+        type=str,
+        default="txt",
+        metavar="EXT",
+        help="Output file extension.",
+    )
 
     args: Args = parser.parse_args(argv, namespace=Args())
     args.in_dir = args.in_dir.absolute()
     if args.out_file is None:
+        args = typing.cast(Args, args)
         if not args.autoname_output:
             parser.error("required: -O or [out_file]")
-        args.out_file = Path(f"{args.in_dir.name}.md").absolute()
+        ext = args.output_extension
+        args.out_file = Path(f"{args.in_dir.name}_md.{ext}").absolute()
     if not args.force and args.out_file.exists():
         parser.error(f"{args.out_file} exists. Use -f to overwrite.")
     args.out_file = args.out_file.absolute()
