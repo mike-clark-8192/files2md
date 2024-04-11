@@ -7,22 +7,41 @@ from typing import Iterable
 import pathspec
 
 from files2md import fileinfo, md_transform
-from . import arg, msg
+from files2md.cli import arg, msg
+import files2md.cli.gitutil as gitutil
 
 
-def collect_paths(
-    use_default_patterns: bool,
-    include_patterns: list[str] = [],
-    exclude_patterns: list[str] = [],
+def collect_paths_git(
+    args: arg.Args, patterns: list[str]
 ) -> tuple[list[Path], list[str]]:
+    all_paths: list[Path] = gitutil.git_lsfiles_dirs(args.in_dirs)
+    pathspec_obj = pathspec.PathSpec.from_lines("gitwildmatch", patterns)
+    all_paths = [p for p in all_paths if pathspec_obj.match_file(p)]
+    return all_paths, patterns
+
+
+def collect_paths(args: arg.Args) -> tuple[list[Path], list[str]]:
+
+    use_default_patterns: bool = args.use_default_patterns
+    include_patterns: list[str] = args.glob_patterns
+    exclude_patterns: list[str] = args.exclude_patterns
+
     patterns = [f"**"]
     if use_default_patterns:
         patterns.extend(fileinfo.DEFAULT_PATTERNS)
     exclude_patterns = [f"!{pattern}" for pattern in exclude_patterns]
     patterns.extend(exclude_patterns)
     patterns.extend(include_patterns)
-    spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns)
-    return [Path(x) for x in spec.match_tree(".")], patterns
+
+    if args.git:
+        return collect_paths_git(args, patterns)
+
+    all_paths: list[Path] = []
+    for in_dir in args.in_dirs:
+        spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns)
+        specced = [in_dir.joinpath(x) for x in spec.match_tree(in_dir)]
+        all_paths.extend(specced)
+    return all_paths, patterns
 
 
 def file_sizes_and_names(summary: md_transform.TransformSummary) -> Iterable[str]:
@@ -36,11 +55,10 @@ def file_sizes_and_names(summary: md_transform.TransformSummary) -> Iterable[str
 
 def main(argv: list[str] = sys.argv[1:]):
     args = arg.parse(argv)
-    os.chdir(args.in_dir)
-    files, applied_patterns = collect_paths(
-        args.use_default_patterns, args.glob_patterns, args.exclude_patterns
+    files, applied_patterns = collect_paths(args)
+    project_name = (
+        ", ".join(d.name for d in args.in_dirs) or "No directories specified."
     )
-    project_name = args.in_dir.name
 
     with open(args.out_file, "w", encoding=args.output_encoding) as ofh:
         transform = md_transform.MdTransform(
@@ -48,7 +66,7 @@ def main(argv: list[str] = sys.argv[1:]):
             include_empty=args.include_empty,
             mlpf_approx_pct=args.mlpf_approx_pct,
         )
-        transform.make_md(project_name, args.in_dir, files, ofh)
+        transform.make_md(project_name, args.in_dirs, files, ofh)
 
     output_file_size = args.out_file.stat().st_size
     with msg.VPrinter(args.verbosity) as vprint:

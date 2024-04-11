@@ -5,8 +5,7 @@ import types
 
 
 class Args:
-    in_dir: Path
-    out_file: Path
+    in_dirs: list[Path]
     glob_patterns: list[str]
     exclude_patterns: list[str]
     use_default_patterns: bool
@@ -18,6 +17,10 @@ class Args:
     autoname_output: bool
     force: bool
     output_extension: str
+    first_pass: Path
+    git: bool
+    out_dir: Path
+    out_file: Path
 
     def __setattr__(self, name: str, value: typing.Any) -> None:
         import typing
@@ -43,16 +46,36 @@ def parse(argv: list[str]) -> Args:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "in_dir",
-        type=type_existing_directory,
-        help="Input directory.",
+        "in_dirs",
+        nargs="+",
+        type=ArgType.existing_dir,
+        metavar="DIR",
+        help="Specify one or more input directories.",
     )
-    parser.add_argument(
-        "out_file",
-        type=Path,
-        nargs="?",
-        help="Output markdown file.",
-    )
+
+    def add_output_options():
+        parser.add_argument(
+            "-d",
+            "--out-dir",
+            type=ArgType.existing_dir,
+        )
+        group = parser.add_mutually_exclusive_group(required=True)
+        group.add_argument(
+            "-o",
+            "--out-file",
+            type=Path,
+            help="Output file.",
+        )
+        group.add_argument(
+            "-O",
+            "--autoname-output",
+            action="store_true",
+            default=False,
+            help="Automatically name the output file.",
+        )
+
+    add_output_options()
+
     parser.add_argument(
         "-g",
         "--glob-patterns",
@@ -116,13 +139,6 @@ def parse(argv: list[str]) -> Args:
         help="Increase verbosity. Repeat for more output.",
     )
     parser.add_argument(
-        "-O",
-        "--autoname-output",
-        action="store_true",
-        default=False,
-        help="Automatically name the output file.",
-    )
-    parser.add_argument(
         "-f",
         "--force",
         action="store_true",
@@ -136,30 +152,61 @@ def parse(argv: list[str]) -> Args:
         metavar="EXT",
         help="Output file extension.",
     )
+    parser.add_argument(
+        "-1",
+        "--first-pass",
+        type=Path,
+        metavar="FILE",
+        help="Write first-pass metadata to FILE.",
+    )
+    parser.add_argument(
+        "-t",
+        "--git",
+        action="store_true",
+        default=False,
+        help="Use 'git' to list files in input directories.",
+    )
 
     args: Args = parser.parse_args(argv, namespace=Args())
-    args.in_dir = args.in_dir.absolute()
+    args.in_dirs = [d.absolute() for d in args.in_dirs]
     if args.out_file is None:
         args = typing.cast(Args, args)
         if not args.autoname_output:
             parser.error("required: -O or [out_file]")
         ext = args.output_extension
-        args.out_file = Path(f"{args.in_dir.name}_md.{ext}").absolute()
+        in_dir_names = "_".join(d.name for d in args.in_dirs)
+        args.out_file = Path(f"{in_dir_names}_md.{ext}").absolute()
     if not args.force and args.out_file.exists():
         parser.error(f"{args.out_file} exists. Use -f to overwrite.")
     args.out_file = args.out_file.absolute()
     return args
 
 
-def type_existing_directory(path_str):
-    path = Path(path_str)
-    if not path.is_dir():
-        raise argparse.ArgumentTypeError(f"{path} is not a valid directory.")
-    return path.absolute()
+class ArgType:
+    @staticmethod
+    def existing_dir(path_str: str) -> Path:
+        path = Path(path_str)
+        if not path.is_dir():
+            raise argparse.ArgumentTypeError(f"expected a directory: {path}")
+        return path.absolute()
 
+    @staticmethod
+    def existing_file(path_str: str) -> Path:
+        path = Path(path_str)
+        if not path.is_file():
+            raise argparse.ArgumentTypeError(f"expected a file: {path}")
+        return path.absolute()
 
-def type_overwritable_file(path_str):
-    path = Path(path_str)
-    if path.exists() and not path.is_file():
-        raise argparse.ArgumentTypeError(f"{path} exists and is not a file.")
-    return path.absolute()
+    @staticmethod
+    def file_or_nonexistant(path_str: str) -> Path:
+        path = Path(path_str)
+        if path.exists() and not path.is_file():
+            raise argparse.ArgumentTypeError(f"exists and is not a file: {path}")
+        return path.absolute()
+
+    @staticmethod
+    def dir_or_nonexistant(path_str: str) -> Path:
+        path = Path(path_str)
+        if path.exists() and not path.is_dir():
+            raise argparse.ArgumentTypeError(f"exists and is not a directory: {path}")
+        return path.absolute()

@@ -67,9 +67,16 @@ DEFAULT_PATTERNS = [
     "*.msix",
     "*.suo",
     "*.pdb",
+    # visual studio build output
     "*.idb",
     "*.ilk",
     "*.exp",
+    "*.pch",
+    "*.ipch",
+    "*.sbr",
+    "*.tlb",
+    "*.tlh",
+    "*.tli",
     ## re-include files
     "README",
     "README.md",

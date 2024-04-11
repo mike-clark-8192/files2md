@@ -108,11 +108,11 @@ class MdTransform:
     def make_md(
         self,
         project_name: str,
-        indir: Path,
+        in_dirs: list[Path],
         files: list[Path],
         ofh: io.IOBase,
     ):
-        path_descs = {file: self.describe_path(file, indir) for file in files}
+        path_descs = {file: self.describe_path(file, in_dirs) for file in files}
         header = self.make_header_md(project_name, path_descs.values())
         ofh.write(header)
         ofh_path = Path(getattr(ofh, "name", ""))
@@ -123,7 +123,6 @@ class MdTransform:
             mdstr, content_excluded = self.file_to_md(file, pathdesc)
             ofh.write(mdstr)
             self.summary_track_file(file, mdstr, content_excluded)
-            self.total_chars_written += len(mdstr)
 
     def make_header_md(self, project_name: str, pathdescs: Iterable[str]):
         files_listing = self.make_files_listing(pathdescs)
@@ -147,6 +146,7 @@ class MdTransform:
         return mdchunk
 
     def fence_for_content(self, content: str):
+        fence = "`" * MIN_FENCE_LEN
         for i in range(MIN_FENCE_LEN, MAX_FENCE_LEN + 1):
             fence = "`" * i
             if fence not in content:
@@ -244,9 +244,13 @@ class MdTransform:
             return True
         return False
 
-    def describe_path(self, path: Path, base: Path) -> str:
-        relpath = path.resolve().relative_to(base)
-        return str(relpath.as_posix())
+    def describe_path(self, path: Path, bases: list[Path]) -> str:
+        for base in bases:
+            if base in path.parents:
+                relpos = path.relative_to(base).as_posix()
+                desc = f"{base.name}/{relpos}"
+                return desc
+        return path.as_posix()
 
     def detect_encoding(self, file_path: Path, *, max_bytes: int = 100_000):
         if not charset_normalizer:

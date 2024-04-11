@@ -27,4 +27,7 @@ files2md = "files2md.cli:main"
 distribution = true
 
 [tool.pdm.dev-dependencies]
-dev = ["debugpy>=1.8.1"]
+dev = ["debugpy>=1.8.1", "pytest>=8.1.1"]
+
+[tool.pyright]
+exclude = ["build/**", ".venv/**"]
