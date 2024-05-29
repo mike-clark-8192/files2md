@@ -1,26 +1,27 @@
 import argparse
+import pathlib
 from pathlib import Path
 import typing
 import types
 
 
 class Args:
-    in_dirs: list[Path]
-    glob_patterns: list[str]
+    autoname_output: bool
     exclude_patterns: list[str]
+    first_pass: pathlib.Path
+    force: bool
+    git: bool
+    glob_patterns: list[str]
+    in_dirs: list[pathlib.Path]
+    include_empty: bool
+    max_lines_per_file: int
+    mlpf_approx_pct: int
+    out_dir: pathlib.Path
+    out_file: pathlib.Path
+    output_encoding: str
+    output_extension: str
     use_default_patterns: bool
     verbosity: int
-    max_lines_per_file: int
-    output_encoding: str
-    include_empty: bool
-    mlpf_approx_pct: int
-    autoname_output: bool
-    force: bool
-    output_extension: str
-    first_pass: Path
-    git: bool
-    out_dir: Path
-    out_file: Path
 
     def __setattr__(self, name: str, value: typing.Any) -> None:
         import typing
@@ -41,6 +42,24 @@ class Args:
 
 
 def parse(argv: list[str]) -> Args:
+    parser = build_argparser()
+
+    args: Args = parser.parse_args(argv, namespace=Args())
+    args.in_dirs = [d.absolute() for d in args.in_dirs]
+    if args.out_file is None:
+        args = typing.cast(Args, args)
+        if not args.autoname_output:
+            parser.error("required: -O or [out_file]")
+        ext = args.output_extension
+        in_dir_names = "_".join(d.name for d in args.in_dirs)
+        args.out_file = Path(f"{in_dir_names}_md.{ext}").absolute()
+    if not args.force and args.out_file.exists():
+        parser.error(f"{args.out_file} exists. Use -f to overwrite.")
+    args.out_file = args.out_file.absolute()
+    return args
+
+
+def build_argparser():
     parser = argparse.ArgumentParser(
         description="Convert file structure to markdown.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -167,19 +186,7 @@ def parse(argv: list[str]) -> Args:
         help="Use 'git' to list files in input directories.",
     )
 
-    args: Args = parser.parse_args(argv, namespace=Args())
-    args.in_dirs = [d.absolute() for d in args.in_dirs]
-    if args.out_file is None:
-        args = typing.cast(Args, args)
-        if not args.autoname_output:
-            parser.error("required: -O or [out_file]")
-        ext = args.output_extension
-        in_dir_names = "_".join(d.name for d in args.in_dirs)
-        args.out_file = Path(f"{in_dir_names}_md.{ext}").absolute()
-    if not args.force and args.out_file.exists():
-        parser.error(f"{args.out_file} exists. Use -f to overwrite.")
-    args.out_file = args.out_file.absolute()
-    return args
+    return parser
 
 
 class ArgType:
