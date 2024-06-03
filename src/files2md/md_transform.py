@@ -1,11 +1,13 @@
 import io
 import mimetypes
 import re
+from abc import ABC, abstractmethod
+import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from string import Template
 from types import ModuleType
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable, final, override
 
 import files2md
 import files2md.fileinfo as fileinfo
@@ -90,14 +92,124 @@ class TransformSummary:
     content_excluded_files: dict[Path, bool] = field(default_factory=dict)
 
 
-class MdTransform:
+class OutputHandler(ABC):
+    @abstractmethod
+    def write(self, s: str):
+        pass
+
+    @abstractmethod
+    def on_after_md_header(self):
+        pass
+
+    @abstractmethod
+    def on_after_md_section(self):
+        pass
+
+    @abstractmethod
+    def on_complete(self):
+        pass
+
+
+class SingleFileOutputHandler(OutputHandler):
+    def __init__(self, ofh: io.TextIOWrapper):
+        self.ofh = ofh
+
+    @override
+    def write(self, s: str):
+        self.ofh.write(s)
+
+    @override
+    def on_after_md_header(self):
+        pass
+
+    @override
+    def on_after_md_section(self):
+        pass
+
+    @override
+    def on_complete(self):
+        self.ofh.close()
+
+
+class SplitFileOutputHandler(OutputHandler):
+    def __init__(
+        self, *, initial_path: Path, kb_per_file: int, output_encoding: str = "utf-8"
+    ):
+        self.initial_path = initial_path
+        self.kb_per_file = kb_per_file
+        self.output_encoding = output_encoding
+
+        self.current_split_num: int = 0
+        self.current_ofh, self.current_file = self.split()
+
+    def split(self) -> tuple[io.TextIOWrapper, Path]:
+        if self.current_ofh:
+            self.current_ofh.close()
+        self.current_split_num += 1
+        current_split_path = self.get_current_split_filepath()
+        self.current_ofh = open(current_split_path, "w", encoding=self.output_encoding)
+        self.current_file = current_split_path
+        return self.current_ofh, self.current_file
+
+    def get_current_split_filepath(self):
+        """
+        for example:
+            * if self.initial_path is == /tmp/data/foo.md
+            * and self.current_split_num == 1
+        then:
+            * return == /tmp/data/foo-1.md
+        """
+        stem = self.initial_path.parent / self.initial_path.stem
+        suffix = self.initial_path.suffix
+        new_suffix = f"-{self.current_split_num}.{suffix}"
+        return stem.with_suffix(new_suffix)
+
+    @override
+    def write(self, s: str):
+        self.current_ofh.write(s)
+
+    @override
+    def on_after_md_header(self):
+        self.split()
+
+    @override
+    def on_after_md_section(self):
+        if not self.current_ofh:
+            return
+        tell = self.current_ofh.tell()
+        if tell > self.kb_per_file * 1000:
+            self.split()
+
+    @override
+    def on_complete(self):
+        if self.current_ofh:
+            self.current_ofh.close()
+
+
+# if is type checking:
+
+if TYPE_CHECKING:
+    SplitFileOutputHandler(
+        initial_path=Path(""), kb_per_file=0, output_encoding="utf-8"
+    )
+
+
+class MdTransform(contextlib.AbstractContextManager):
     def __init__(
         self,
         *,
+        output: OutputHandler | Path | io.TextIOWrapper,
         max_lines_per_file: int = 0,
         include_empty: bool = False,
         mlpf_approx_pct: int = 25,
     ):
+        if isinstance(output, Path):
+            output = open(output, "w", encoding="utf-8")
+            self.output_handler = SingleFileOutputHandler(output)
+        elif isinstance(output, io.TextIOWrapper):
+            self.output_handler = SingleFileOutputHandler(output)
+        else:
+            self.output_handler = output
         self.max_lines_per_file = max_lines_per_file
         self.include_empty = include_empty
         self.mlpf_approx_pct = mlpf_approx_pct
@@ -105,12 +217,17 @@ class MdTransform:
         self.total_chars_written = 0
         self.summary = TransformSummary()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.output_handler.on_complete()
+
     def make_md(
         self,
         project_name: str,
         in_dirs: list[Path],
         files: list[Path],
-        ofh: io.IOBase,
     ):
         path_descs = {file: self.describe_path(file, in_dirs) for file in files}
         header = self.make_header_md(project_name, path_descs.values())

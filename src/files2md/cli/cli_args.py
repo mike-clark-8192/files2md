@@ -10,7 +10,7 @@ class Args:
     exclude_patterns: list[str]
     first_pass: pathlib.Path
     force: bool
-    git: bool
+    git_ls_files: bool
     glob_patterns: list[str]
     in_dirs: list[pathlib.Path]
     include_empty: bool
@@ -160,7 +160,7 @@ def build_argparser():
     parser.add_argument(
         "-f",
         "--force",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=False,
         help="Force overwrite output file(s).",
     )
@@ -180,10 +180,18 @@ def build_argparser():
     )
     parser.add_argument(
         "-t",
-        "--git",
-        action="store_true",
+        "--git-ls-files",
+        action=argparse.BooleanOptionalAction,
         default=False,
-        help="Use 'git' to list files in input directories.",
+        help="Use 'git ls-files' to list files in input directories.",
+    )
+    parser.add_argument(
+        "-s",
+        "--split",
+        type=int,
+        metavar="KB",
+        default=0,
+        help="Split output into multiple files of [approximate] size `KB` kilobytes each.",
     )
 
     return parser

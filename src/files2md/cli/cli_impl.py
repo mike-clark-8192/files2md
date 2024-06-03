@@ -7,12 +7,12 @@ from typing import Iterable
 import pathspec
 
 from files2md import fileinfo, md_transform
-from files2md.cli import arg, msg
+from files2md.cli import cli_args, msg
 import files2md.cli.gitutil as gitutil
 
 
 def collect_paths_git(
-    args: arg.Args, patterns: list[str]
+    args: cli_args.Args, patterns: list[str]
 ) -> tuple[list[Path], list[str]]:
     all_paths: list[Path] = gitutil.git_lsfiles_dirs(args.in_dirs)
     pathspec_obj = pathspec.PathSpec.from_lines("gitwildmatch", patterns)
@@ -20,7 +20,7 @@ def collect_paths_git(
     return all_paths, patterns
 
 
-def collect_paths(args: arg.Args) -> tuple[list[Path], list[str]]:
+def collect_paths(args: cli_args.Args) -> tuple[list[Path], list[str]]:
 
     use_default_patterns: bool = args.use_default_patterns
     include_patterns: list[str] = args.glob_patterns
@@ -33,7 +33,7 @@ def collect_paths(args: arg.Args) -> tuple[list[Path], list[str]]:
     patterns.extend(exclude_patterns)
     patterns.extend(include_patterns)
 
-    if args.git:
+    if args.git_ls_files:
         return collect_paths_git(args, patterns)
 
     all_paths: list[Path] = []
@@ -54,7 +54,7 @@ def file_sizes_and_names(summary: md_transform.TransformSummary) -> Iterable[str
 
 
 def main(argv: list[str] = sys.argv[1:]):
-    args = arg.parse(argv)
+    args = cli_args.parse(argv)
     files, applied_patterns = collect_paths(args)
     project_name = (
         ", ".join(d.name for d in args.in_dirs) or "No directories specified."
