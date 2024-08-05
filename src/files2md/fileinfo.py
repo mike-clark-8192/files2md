@@ -8,7 +8,6 @@ DEFAULT_PATTERNS = [
     "!package-lock.json",
     "!yarn.lock",
     "!pnpm-lock.yaml",
-    "!.gitignore",
     "!.dockerignore",
     "!.npmignore",
     "!.prettierignore",

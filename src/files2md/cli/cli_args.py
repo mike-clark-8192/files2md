@@ -3,6 +3,7 @@ import pathlib
 from pathlib import Path
 import typing
 import types
+import re
 
 
 class Args:
@@ -10,7 +11,7 @@ class Args:
     exclude_patterns: list[str]
     first_pass: pathlib.Path
     force: bool
-    git: bool
+    git_ls_files: bool
     glob_patterns: list[str]
     in_dirs: list[pathlib.Path]
     include_empty: bool
@@ -21,7 +22,10 @@ class Args:
     output_encoding: str
     output_extension: str
     use_default_patterns: bool
+    split: int
+    sub_rules_file: str
     verbosity: int
+    quietosity: int
 
     def __setattr__(self, name: str, value: typing.Any) -> None:
         import typing
@@ -56,6 +60,9 @@ def parse(argv: list[str]) -> Args:
     if not args.force and args.out_file.exists():
         parser.error(f"{args.out_file} exists. Use -f to overwrite.")
     args.out_file = args.out_file.absolute()
+
+    args.verbosity = args.verbosity - args.quietosity
+
     return args
 
 
@@ -153,14 +160,22 @@ def build_argparser():
         "-v",
         "--verbose",
         action="count",
-        default=0,
+        default=5,
         dest="verbosity",
         help="Increase verbosity. Repeat for more output.",
     )
     parser.add_argument(
+        "-q",
+        "--quiet",
+        action="count",
+        default=0,
+        dest="quietosity",
+        help="Decrease verbosity. Repeat for less output.",
+    )
+    parser.add_argument(
         "-f",
         "--force",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=False,
         help="Force overwrite output file(s).",
     )
@@ -180,12 +195,26 @@ def build_argparser():
     )
     parser.add_argument(
         "-t",
-        "--git",
-        action="store_true",
+        "--git-ls-files",
+        action=argparse.BooleanOptionalAction,
         default=False,
-        help="Use 'git' to list files in input directories.",
+        help="Use 'git ls-files' to list files in input directories.",
     )
-
+    parser.add_argument(
+        "-p",
+        "--split",
+        type=int,
+        metavar="KB",
+        default=0,
+        help="Split output into multiple files of [approximate] size `KB` kilobytes each.",
+    )
+    parser.add_argument(
+        "-s",
+        "--sub-rules-file",
+        type=str,
+        metavar="FILE",
+        help="Specify a file containing text substitution rules.",
+    )
     return parser
 
 

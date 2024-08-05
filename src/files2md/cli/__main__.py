@@ -1,3 +1,4 @@
-from .impl import main
+from .cli_impl import main
 
-main()
+if __name__ == "__main__":
+    main()
