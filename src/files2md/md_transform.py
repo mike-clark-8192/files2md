@@ -8,6 +8,7 @@ from pathlib import Path
 from string import Template
 from types import ModuleType
 from typing import TYPE_CHECKING, Iterable, final, override
+import typing
 
 import files2md
 import files2md.fileinfo as fileinfo
@@ -109,6 +110,10 @@ class OutputHandler(ABC):
     def on_complete(self):
         pass
 
+    @abstractmethod
+    def get_filepaths(self) -> list[Path]:
+        pass
+
 
 class SingleFileOutputHandler(OutputHandler):
     def __init__(self, ofh: io.TextIOWrapper):
@@ -130,6 +135,12 @@ class SingleFileOutputHandler(OutputHandler):
     def on_complete(self):
         self.ofh.close()
 
+    @override
+    def get_filepaths(self) -> list[Path]:
+        if not hasattr(self.ofh, "name"):
+            return []
+        return [Path(self.ofh.name)]
+
 
 class SplitFileOutputHandler(OutputHandler):
     def __init__(
@@ -138,18 +149,22 @@ class SplitFileOutputHandler(OutputHandler):
         self.initial_path = initial_path
         self.kb_per_file = kb_per_file
         self.output_encoding = output_encoding
-
+        self.output_paths: list[Path] = []
         self.current_split_num: int = 0
-        self.current_ofh, self.current_file = self.split()
+        self.current_output_fh, self.current_output_path = self.split()
 
     def split(self) -> tuple[io.TextIOWrapper, Path]:
-        if self.current_ofh:
-            self.current_ofh.close()
+        if self.current_output_fh:
+            self.current_output_fh.close()
+        if self.current_output_path:
+            self.output_paths.append(self.current_output_path)
         self.current_split_num += 1
         current_split_path = self.get_current_split_filepath()
-        self.current_ofh = open(current_split_path, "w", encoding=self.output_encoding)
-        self.current_file = current_split_path
-        return self.current_ofh, self.current_file
+        self.current_output_fh = open(
+            current_split_path, "w", encoding=self.output_encoding
+        )
+        self.current_output_path = current_split_path
+        return self.current_output_fh, self.current_output_path
 
     def get_current_split_filepath(self):
         """
@@ -166,7 +181,7 @@ class SplitFileOutputHandler(OutputHandler):
 
     @override
     def write(self, s: str):
-        self.current_ofh.write(s)
+        self.current_output_fh.write(s)
 
     @override
     def on_after_md_header(self):
@@ -174,16 +189,20 @@ class SplitFileOutputHandler(OutputHandler):
 
     @override
     def on_after_md_section(self):
-        if not self.current_ofh:
+        if not self.current_output_fh:
             return
-        tell = self.current_ofh.tell()
+        tell = self.current_output_fh.tell()
         if tell > self.kb_per_file * 1000:
             self.split()
 
     @override
     def on_complete(self):
-        if self.current_ofh:
-            self.current_ofh.close()
+        if self.current_output_fh:
+            self.current_output_fh.close()
+
+    @override
+    def get_filepaths(self) -> list[Path]:
+        return self.output_paths + [self.current_output_path]
 
 
 # if is type checking:
@@ -194,7 +213,7 @@ if TYPE_CHECKING:
     )
 
 
-class MdTransform(contextlib.AbstractContextManager):
+class MdWriter(contextlib.AbstractContextManager):
     def __init__(
         self,
         *,
@@ -202,6 +221,11 @@ class MdTransform(contextlib.AbstractContextManager):
         max_lines_per_file: int = 0,
         include_empty: bool = False,
         mlpf_approx_pct: int = 25,
+        project_name: str,
+        in_dirs: list[Path],
+        files: list[Path],
+        md_formatter: "MdFormatter | None" = None,
+        sub_rules_file: str,
     ):
         if isinstance(output, Path):
             output = open(output, "w", encoding="utf-8")
@@ -210,6 +234,9 @@ class MdTransform(contextlib.AbstractContextManager):
             self.output_handler = SingleFileOutputHandler(output)
         else:
             self.output_handler = output
+        self.in_dirs = in_dirs
+        self.files = files
+        self.project_name = project_name
         self.max_lines_per_file = max_lines_per_file
         self.include_empty = include_empty
         self.mlpf_approx_pct = mlpf_approx_pct
@@ -217,29 +244,136 @@ class MdTransform(contextlib.AbstractContextManager):
         self.total_chars_written = 0
         self.summary = TransformSummary()
 
+        def build_md_formatter() -> MdFormatter:
+            if md_formatter is not None:
+                return md_formatter
+            return MdFormatter(
+                tag_str=self.tag_substr,
+                exclude_empty=not self.include_empty,
+                max_lines_per_file=self.max_lines_per_file,
+                mlpf_approx_pct=self.mlpf_approx_pct,
+                sub_rules_file=sub_rules_file,
+            )
+
+        self.mdfmt: MdFormatter = build_md_formatter()
+
+    def make_md(
+        self,
+    ):
+        in_dirs = self.in_dirs
+        files = self.files
+        path_descs = {file: self.describe_path(file, in_dirs) for file in files}
+        header = self.mdfmt.make_header_md(self.project_name, path_descs.values())
+        self.output_handler.write(header)
+        self.output_handler.on_after_md_header()
+        for file in sorted(files):
+            if any(
+                ofh_path.samefile(file)
+                for ofh_path in self.output_handler.get_filepaths()
+            ):
+                continue
+            pathdesc = path_descs[file]
+            mdstr, content_truncated, content_excluded = self.mdfmt.file_to_md(
+                file, pathdesc
+            )
+            self.output_handler.write(mdstr)
+            self.output_handler.on_after_md_section()
+            self.summary_track_file(file, mdstr, content_truncated, content_excluded)
+
+    def make_tag_substr(self):
+        tpl = TEMPLATE_GENERATOR_TAG.template.strip()
+        spl = re.split(r"(\s+)", tpl)
+        substr = "".join(spl[1:-1]).strip()
+        return substr
+
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.output_handler.on_complete()
+        return self.output_handler.on_complete()
 
-    def make_md(
-        self,
-        project_name: str,
-        in_dirs: list[Path],
-        files: list[Path],
+    def describe_path(self, path: Path, bases: list[Path]) -> str:
+        for base in bases:
+            if base in path.parents:
+                relpos = path.relative_to(base).as_posix()
+                desc = f"{base.name}/{relpos}"
+                return desc
+        return path.as_posix()
+
+    def summary_track_file(
+        self, file: Path, content: str, content_truncated: bool, content_excluded: bool
     ):
-        path_descs = {file: self.describe_path(file, in_dirs) for file in files}
-        header = self.make_header_md(project_name, path_descs.values())
-        ofh.write(header)
-        ofh_path = Path(getattr(ofh, "name", ""))
-        for file in sorted(files):
-            if ofh_path.samefile(file):
-                continue
-            pathdesc = path_descs[file]
-            mdstr, content_excluded = self.file_to_md(file, pathdesc)
-            ofh.write(mdstr)
-            self.summary_track_file(file, mdstr, content_excluded)
+        ext = file.suffix
+        if not ext:
+            ext = file.name
+        suffix2count = self.summary.suffix_to_file_count
+        suffix2count[ext] = suffix2count.get(ext, 0) + 1
+        self.summary.included_files.append(file)
+        if content_excluded:
+            self.summary.content_excluded_files[file] = True
+        if content_truncated:
+            self.summary.truncated_files.append(file)
+        self.summary.files_to_char_count[file] = len(content)
+
+
+class TextSubstituter(ABC):
+    @abstractmethod
+    def substitute(self, s: str) -> str:
+        pass
+
+
+class RETextSubstituter(TextSubstituter):
+    def __init__(self, pattern: str, repl: str):
+        self.pattern = re.compile(pattern)
+        self.repl = repl
+        print(f"RETextSubstituter {pattern=}, {repl=}")
+
+    @override
+    def substitute(self, s: str) -> str:
+        result = self.pattern.sub(self.repl, s)
+        print(f"RETextSubstituter {self.pattern=}, {self.repl=}, {s=}, {result=}")
+        return result
+
+
+class MdFormatter:
+    def __init__(
+        self,
+        *,
+        tag_str: str,
+        exclude_empty: bool,
+        max_lines_per_file: int,
+        mlpf_approx_pct: int,
+        sub_rules_file: str,
+    ):
+        self.tag_str = tag_str
+        self.exclude_empty = exclude_empty
+        self.max_lines_per_file = max_lines_per_file
+        self.mlpf_approx_pct = mlpf_approx_pct
+        self.sub_rules_file = sub_rules_file
+        self.compiled_sub_rules = self.compile_sub_rules()
+
+    def compile_sub_rules(self) -> list[TextSubstituter]:
+        # Linewise comments are supported in the substitution rules file via the `#` character.
+        # Inline comments are not supported.
+        # To begin a substitution with a literal `#` character, escape it with a backslash.
+        # This works because Python's regex parser treats `\#` as a literal `#`.
+        # Alternatively you could use a character class: `[#]`.
+        # Separate the pattern and replacement with one or more tabs.
+        re_comment_line = re.compile(r"^\s*#")
+        if not self.sub_rules_file:
+            return []
+        substituters = []
+        with open(self.sub_rules_file) as fh:
+            for line in fh:
+                if re_comment_line.match(line):
+                    continue
+                line = line.rstrip("\r\n")
+                split = re.split(r"\t+", line)
+                if len(split) != 2:
+                    continue
+                substituter = RETextSubstituter(split[0], split[1])
+                substituters.append(substituter)
+        return substituters
 
     def make_header_md(self, project_name: str, pathdescs: Iterable[str]):
         files_listing = self.make_files_listing(pathdescs)
@@ -270,17 +404,22 @@ class MdTransform(contextlib.AbstractContextManager):
                 break
         return fence
 
-    def textfile_to_md(self, file: Path, pathname: str, encoding: str):
+    def textfile_to_md(
+        self, file: Path, pathname: str, encoding: str
+    ) -> tuple[str, bool]:
         included_lines, omitted_lines = self.read_file_lines(file, encoding)
+        for tuter in self.compiled_sub_rules:
+            included_lines = tuter.substitute("".join(included_lines)).splitlines(True)
         omission_msg = ""
+        truncated = False
         if omitted_lines:
             omission_msg = TEMPLATE_OMISSION.substitute(
                 omitted_line_count=len(omitted_lines)
             )
-            self.summary.truncated_files.append(file)
+            truncated = True
         content = "".join(included_lines)
         if self.exclude_by_content(content):
-            return ""
+            return "", truncated
         mdlang = self.guess_md_lang(file, content)
         fence = self.fence_for_content(content)
         mdchunk = TEMPLATE_FILE.substitute(
@@ -290,15 +429,14 @@ class MdTransform(contextlib.AbstractContextManager):
             content=content,
             omission_msg=omission_msg,
         )
-        return mdchunk
+        return mdchunk, truncated
 
     def exclude_by_content(self, content: str):
         content_without_ws = content.strip()
         content_is_empty = not content_without_ws
-        cfg_exclude_empty = not self.include_empty
-        if content_is_empty and cfg_exclude_empty:
+        if content_is_empty and self.exclude_empty:
             return True
-        if self.tag_substr in content:
+        if self.tag_str and self.tag_str in content:
             return True
         return False
 
@@ -324,27 +462,38 @@ class MdTransform(contextlib.AbstractContextManager):
                 omitted_lines = []
         return lines, omitted_lines
 
-    def file_to_md(self, file: Path, pathname: str) -> tuple[str, bool]:
+    def file_to_md(self, file: Path, pathname: str) -> tuple[str, bool, bool]:
         """
         Returns a tuple of (mdchunk, content_excluded)
 
         mdchunk: str
             The markdown content for the file
+        content_truncated: bool
+            True if the content was truncated, False otherwise
         content_excluded: bool
             True if the content was excluded, False otherwise
         """
+        truncated = False
+        excluded = False
         if self.exclude_by_mime(file):
+            truncated = False
+            excluded = True
             return (
                 TEMPLATE_UNSUPPORTED_MIMETYPE.substitute(
                     pathname=pathname,
                     mimetype=self.guess_mime_type(file),
                 ),
-                True,
+                truncated,
+                excluded,
             )
         encoding = self.detect_encoding(file)
         if encoding == "binary":
-            return self.binfile_to_md(file, pathname), True
-        return self.textfile_to_md(file, pathname, encoding), False
+            truncated = True
+            excluded = False
+            return self.binfile_to_md(file, pathname), truncated, excluded
+
+        mdchunk, truncated = self.textfile_to_md(file, pathname, encoding)
+        return mdchunk, truncated, excluded
 
     def guess_mime_type(self, file: Path):
         mimetype, _ = mimetypes.guess_type(file)
@@ -361,14 +510,6 @@ class MdTransform(contextlib.AbstractContextManager):
             return True
         return False
 
-    def describe_path(self, path: Path, bases: list[Path]) -> str:
-        for base in bases:
-            if base in path.parents:
-                relpos = path.relative_to(base).as_posix()
-                desc = f"{base.name}/{relpos}"
-                return desc
-        return path.as_posix()
-
     def detect_encoding(self, file_path: Path, *, max_bytes: int = 100_000):
         if not charset_normalizer:
             return "utf-8"
@@ -381,17 +522,6 @@ class MdTransform(contextlib.AbstractContextManager):
             if not best:
                 return "binary"
             return best.encoding
-
-    def summary_track_file(self, file: Path, content: str, content_excluded: bool):
-        ext = file.suffix
-        if not ext:
-            ext = file.name
-        suffix2count = self.summary.suffix_to_file_count
-        suffix2count[ext] = suffix2count.get(ext, 0) + 1
-        self.summary.included_files.append(file)
-        if content_excluded:
-            self.summary.content_excluded_files[file] = True
-        self.summary.files_to_char_count[file] = len(content)
 
     def guess_md_lang(self, file_path: Path, _content: str):
         suffix = file_path.suffix
