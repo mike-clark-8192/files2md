@@ -2,10 +2,13 @@
 # It is not intended for manual editing.
 
 [metadata]
-groups = ["default", "dev", "extras", "extra", "extra1", ":all"]
+groups = ["default", "dev", "extras"]
 strategy = ["cross_platform", "inherit_metadata"]
-lock_version = "4.4.1"
-content_hash = "sha256:4f3c8eb2034186a4f803a3acbb88c4643d2d3711562d0b592c196f0ad5b6f622"
+lock_version = "4.5.0"
+content_hash = "sha256:635bac99cfc410aba1d154b8e494d426aea13638134d966387403969a62d660b"
+
+[[metadata.targets]]
+requires_python = ">=3.11"
 
 [[package]]
 name = "autoflake"
