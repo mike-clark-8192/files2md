@@ -42,12 +42,14 @@ ${fence}${omission_msg}
 
 TEMPLATE_BINARY_FILE = Template(
     """### `${pathname}`
-(likely a binary file)"""
+(binary file detected, content excluded)
+"""
 )
 
 TEMPLATE_UNSUPPORTED_MIMETYPE = Template(
     """### `${pathname}`
-(content excluded due to unsupported MIME type: ${mimetype})"""
+(content excluded due to unsupported MIME type: ${mimetype})
+"""
 )
 
 
