@@ -27,28 +27,12 @@ class Args:
     verbosity: int
     quietosity: int
 
-    def __setattr__(self, name: str, value: typing.Any) -> None:
-        import typing
-
-        hints = typing.get_type_hints(self)
-        if name not in hints:
-            raise ValueError(f"{name} is not a declared attribute of {type(self)}")
-        decltype = hints[name]
-        if isinstance(decltype, types.GenericAlias):
-            decltype = decltype.__origin__
-        valtype = type(value)
-        if value is not None and not issubclass(valtype, decltype):
-            raise ValueError(
-                f"Declared type '{decltype.__name__}' of attribute '{name}'"
-                f" is incompatible with value type '{valtype.__name__}', value={value}"
-            )
-        super().__setattr__(name, value)
-
-
 def parse(argv: list[str]) -> Args:
     parser = build_argparser()
 
     args: Args = parser.parse_args(argv, namespace=Args())
+    if not args.in_dirs:
+        args.in_dirs = [Path.cwd()]
     args.in_dirs = [d.absolute() for d in args.in_dirs]
     if args.out_file is None:
         args = typing.cast(Args, args)
@@ -73,7 +57,7 @@ def build_argparser():
     )
     parser.add_argument(
         "in_dirs",
-        nargs="+",
+        nargs="*",
         type=ArgType.existing_dir,
         metavar="DIR",
         help="Specify one or more input directories.",
