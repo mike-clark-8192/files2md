@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Iterable
 
 import pathspec
+from pathspec.patterns.gitwildmatch import GitWildMatchPattern
 
 from files2md import fileinfo, md_transform
 from files2md.cli import cli_args, msg
@@ -26,7 +27,7 @@ def collect_paths(args: cli_args.Args) -> tuple[list[Path], list[str]]:
     include_patterns: list[str] = args.glob_patterns
     exclude_patterns: list[str] = args.exclude_patterns
 
-    patterns = [f"**"]
+    patterns = []
     if use_default_patterns:
         patterns.extend(fileinfo.DEFAULT_PATTERNS)
     exclude_patterns = [f"!{pattern}" for pattern in exclude_patterns]
