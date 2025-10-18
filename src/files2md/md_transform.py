@@ -477,7 +477,8 @@ class MdFormatter:
         """
         truncated = False
         excluded = False
-        if self.exclude_by_mime(file):
+        has_md_lang = fileinfo.FILEEXT_TO_MDLANG.get(file.suffix.lower(), False)
+        if self.exclude_by_mime(file) and not has_md_lang:
             truncated = False
             excluded = True
             return (

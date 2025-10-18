@@ -28,11 +28,12 @@ class Args:
     verbosity: int
     quietosity: int
 
-
 def parse(argv: list[str]) -> Args:
     parser = build_argparser()
 
     args: Args = parser.parse_args(argv, namespace=Args())
+    if not args.in_dirs:
+        args.in_dirs = [Path.cwd()]
     args.in_dirs = [d.absolute() for d in args.in_dirs]
     if not args.in_dirs:
         args.in_dirs = [Path(os.getcwd())]
