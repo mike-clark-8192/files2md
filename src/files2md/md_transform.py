@@ -81,6 +81,39 @@ MIN_FENCE_LEN = 3
 MAX_FENCE_LEN = 12
 
 
+def count_lines(text: str) -> int:
+    """Count the number of lines in text, as a text editor would.
+
+    Args:
+        text: The text to count lines in
+
+    Returns:
+        The number of lines. A trailing newline doesn't count as an extra line.
+
+    Examples:
+        count_lines("abc") -> 1
+        count_lines("abc\n") -> 1
+        count_lines("abc\ndef") -> 2
+        count_lines("abc\ndef\n") -> 2
+        count_lines("abc\n\n") -> 2
+    """
+    if not text:
+        return 0
+    lines = text.split('\n')
+    if text.endswith('\n'):
+        return len(lines) - 1
+    return len(lines)
+
+
+@dataclass
+class FilePosition:
+    """Represents the position of a file's content in the generated markdown."""
+    path_desc: str          # e.g., "project/file.py"
+    start_line: int         # First line of file's section (the ### header line)
+    end_line: int           # Last line of file's section (after closing fence)
+    content: str            # Generated markdown for this file
+
+
 @dataclass(kw_only=True)
 class TransformSummary:
     # files that were truncated due to max_lines_per_file
@@ -153,6 +186,8 @@ class SplitFileOutputHandler(OutputHandler):
         self.output_encoding = output_encoding
         self.output_paths: list[Path] = []
         self.current_split_num: int = 0
+        self.current_output_fh = None
+        self.current_output_path = None
         self.current_output_fh, self.current_output_path = self.split()
 
     def split(self) -> tuple[io.TextIOWrapper, Path]:
@@ -176,10 +211,11 @@ class SplitFileOutputHandler(OutputHandler):
         then:
             * return == /tmp/data/foo-1.md
         """
-        stem = self.initial_path.parent / self.initial_path.stem
+        parent = self.initial_path.parent
+        stem = self.initial_path.stem
         suffix = self.initial_path.suffix
-        new_suffix = f"-{self.current_split_num}.{suffix}"
-        return stem.with_suffix(new_suffix)
+        new_name = f"{stem}-{self.current_split_num}{suffix}"
+        return parent / new_name
 
     @override
     def write(self, s: str):
@@ -259,28 +295,202 @@ class MdWriter(contextlib.AbstractContextManager):
 
         self.mdfmt: MdFormatter = build_md_formatter()
 
-    def make_md(
-        self,
-    ):
+    def make_md(self):
+        """Generate markdown with TOC containing line numbers for each file."""
+        # Determine if we're in split mode
+        is_split_mode = isinstance(self.output_handler, SplitFileOutputHandler)
+
+        if is_split_mode:
+            self._make_md_split_file()
+        else:
+            self._make_md_single_file()
+
+    def _make_md_single_file(self):
+        """Generate markdown for single-file output with line-numbered TOC."""
         in_dirs = self.in_dirs
         files = self.files
-        path_descs = {file: self.describe_path(file, in_dirs) for file in files}
-        header = self.mdfmt.make_header_md(self.project_name, path_descs.values())
-        self.output_handler.write(header)
-        self.output_handler.on_after_md_header()
+
+        # Step 1: Generate header prefix (without TOC)
+        header_prefix = self.mdfmt.make_header_prefix(self.project_name)
+
+        # Step 2: Generate all file content in memory
+        file_data = []
         for file in sorted(files):
             if any(
                 ofh_path.samefile(file)
                 for ofh_path in self.output_handler.get_filepaths()
             ):
                 continue
-            pathdesc = path_descs[file]
+            pathdesc = self.describe_path(file, in_dirs)
             mdstr, content_truncated, content_excluded = self.mdfmt.file_to_md(
                 file, pathdesc
             )
-            self.output_handler.write(mdstr)
+            file_data.append((file, pathdesc, mdstr, content_truncated, content_excluded))
+
+        # Step 3: Calculate line positions
+        # First, create dummy positions to estimate TOC size
+        dummy_positions = [
+            FilePosition(pathdesc, 1, 1, mdstr)
+            for _, pathdesc, mdstr, _, _ in file_data
+        ]
+        dummy_toc = self.mdfmt.make_files_listing_with_lines(dummy_positions)
+
+        # Calculate offset (lines before first file content)
+        offset = count_lines(header_prefix + dummy_toc)
+
+        # Now calculate actual positions
+        current_line = offset + 1  # +1 for 1-based indexing
+        file_positions = []
+        for file, pathdesc, mdstr, truncated, excluded in file_data:
+            num_lines = count_lines(mdstr)
+            # Simple approach: start_line is where this chunk begins, end_line is where it ends
+            # This naturally includes any spacing/structure from the template
+            start_line = current_line
+            end_line = current_line + num_lines - 1
+            file_positions.append(FilePosition(pathdesc, start_line, end_line, mdstr))
+            current_line = end_line + 1
+
+            # Track for summary
+            self.summary_track_file(file, mdstr, truncated, excluded)
+
+        # Step 4: Generate real TOC with calculated positions
+        toc = self.mdfmt.make_files_listing_with_lines(file_positions)
+
+        # Step 5: Sanity check - TOC size should match estimate
+        if count_lines(toc) != count_lines(dummy_toc):
+            raise RuntimeError("TOC size changed after adding line numbers - this should not happen!")
+
+        # Step 6: Write output
+        self.output_handler.write(header_prefix + toc)
+        self.output_handler.on_after_md_header()
+
+        for fp in file_positions:
+            self.output_handler.write(fp.content)
             self.output_handler.on_after_md_section()
-            self.summary_track_file(file, mdstr, content_truncated, content_excluded)
+
+    def _make_md_split_file(self):
+        """Generate markdown for split-file output with per-split line-numbered TOCs."""
+        in_dirs = self.in_dirs
+        files = self.files
+
+        # Step 1: Generate header prefix (without TOC)
+        header_prefix = self.mdfmt.make_header_prefix(self.project_name)
+
+        # Step 2: Generate all file content in memory
+        all_file_data = []
+        for file in sorted(files):
+            if any(
+                ofh_path.samefile(file)
+                for ofh_path in self.output_handler.get_filepaths()
+            ):
+                continue
+            pathdesc = self.describe_path(file, in_dirs)
+            mdstr, content_truncated, content_excluded = self.mdfmt.file_to_md(
+                file, pathdesc
+            )
+            # Create a temporary FilePosition (line numbers will be recalculated per-split)
+            fp = FilePosition(pathdesc, 0, 0, mdstr)
+            all_file_data.append((file, fp, content_truncated, content_excluded))
+
+        # Step 3: Partition files into splits based on size
+        split_handler = typing.cast(SplitFileOutputHandler, self.output_handler)
+        splits = self._partition_files_for_splits(all_file_data, header_prefix, split_handler.kb_per_file)
+
+        # Step 4: For each split, generate TOC with local line numbers and write
+        for split_file_data in splits:
+            # Extract just the FilePositions for this split
+            split_fps = [fp for _, fp, _, _ in split_file_data]
+
+            # Create dummy TOC to measure size
+            dummy_positions = [
+                FilePosition(fp.path_desc, 1, 1, fp.content)
+                for fp in split_fps
+            ]
+            dummy_toc = self.mdfmt.make_files_listing_with_lines(dummy_positions)
+
+            # Calculate offset for this split
+            offset = count_lines(header_prefix + dummy_toc)
+
+            # Recalculate line numbers local to this split
+            current_line = offset + 1
+            local_positions = []
+            for fp in split_fps:
+                num_lines = count_lines(fp.content)
+                # Simple approach: start_line is where this chunk begins, end_line is where it ends
+                # This naturally includes any spacing/structure from the template
+                start_line = current_line
+                end_line = current_line + num_lines - 1
+                local_positions.append(FilePosition(fp.path_desc, start_line, end_line, fp.content))
+                current_line = end_line + 1
+
+            # Generate real TOC for this split
+            toc = self.mdfmt.make_files_listing_with_lines(local_positions)
+
+            # Write header + TOC + content for this split
+            self.output_handler.write(header_prefix + toc)
+            # Don't call on_after_md_header() here - we want content in the same file
+
+            for fp in local_positions:
+                self.output_handler.write(fp.content)
+                self.output_handler.on_after_md_section()
+
+            # Track summary for all files in this split
+            for file, _, truncated, excluded in split_file_data:
+                # Find the corresponding file position
+                for fp in local_positions:
+                    self.summary_track_file(file, fp.content, truncated, excluded)
+                    break
+
+    def _partition_files_for_splits(
+        self,
+        all_file_data: list[tuple[Path, FilePosition, bool, bool]],
+        header_prefix: str,
+        kb_per_file: int
+    ) -> list[list[tuple[Path, FilePosition, bool, bool]]]:
+        """Partition files into splits based on size limits.
+
+        Args:
+            all_file_data: List of (file, FilePosition, truncated, excluded) tuples
+            header_prefix: The header text (used to estimate header size per split)
+            kb_per_file: Size limit in kilobytes
+
+        Returns:
+            List of splits, where each split is a list of file data tuples
+        """
+        # Estimate header size (we'll add a TOC, but estimate conservatively)
+        avg_toc_line_length = 100  # Rough estimate for "`path` (lines N-M)\n"
+        est_files_per_split = max(1, (kb_per_file * 1000) // (avg_toc_line_length * 10))
+
+        # Estimate TOC size for a split
+        est_toc_lines = min(est_files_per_split, len(all_file_data))
+        est_header_size_bytes = len(header_prefix.encode('utf-8')) + (est_toc_lines * avg_toc_line_length)
+
+        splits = []
+        current_split = []
+        current_size_bytes = est_header_size_bytes
+        bytes_limit = kb_per_file * 1000
+
+        for file_data in all_file_data:
+            _, fp, _, _ = file_data
+            content_size_bytes = len(fp.content.encode('utf-8'))
+
+            # Check if adding this file would exceed the limit
+            # (but always include at least one file per split)
+            if current_split and (current_size_bytes + content_size_bytes) > bytes_limit:
+                # Finish current split and start a new one
+                splits.append(current_split)
+                current_split = [file_data]
+                current_size_bytes = est_header_size_bytes + content_size_bytes
+            else:
+                # Add to current split
+                current_split.append(file_data)
+                current_size_bytes += content_size_bytes
+
+        # Don't forget the last split
+        if current_split:
+            splits.append(current_split)
+
+        return splits
 
     def make_tag_substr(self):
         tpl = TEMPLATE_GENERATOR_TAG.template.strip()
@@ -377,7 +587,41 @@ class MdFormatter:
                 substituters.append(substituter)
         return substituters
 
+    def make_header_prefix(self, project_name: str) -> str:
+        """Generate the header prefix without the file listing TOC.
+
+        Args:
+            project_name: The name of the project
+
+        Returns:
+            Header text with project name and generator tag, but no TOC
+        """
+        header_parts = [
+            TEMPLATE_PROJECT.substitute(project_name=project_name),
+            TEMPLATE_GENERATOR_TAG.substitute(files2md_version=files2md.__version__),
+        ]
+        return "\n".join(header_parts) + "\n"
+
+    def make_files_listing_with_lines(self, file_positions: list[FilePosition]) -> str:
+        """Generate file listing TOC with line numbers.
+
+        Args:
+            file_positions: List of FilePosition objects with line numbers
+
+        Returns:
+            Formatted TOC section with line numbers
+        """
+        files_lines = []
+        for fp in file_positions:
+            files_lines.append(f"`{fp.path_desc}` (lines {fp.start_line}-{fp.end_line})")
+        files_listing = "\n".join(files_lines)
+        return TEMPLATE_FILELIST.substitute(files_listing=files_listing)
+
     def make_header_md(self, project_name: str, pathdescs: Iterable[str]):
+        """Generate complete header with file listing (legacy method without line numbers).
+
+        This method is kept for backward compatibility.
+        """
         files_listing = self.make_files_listing(pathdescs)
         header_parts = [
             TEMPLATE_PROJECT.substitute(project_name=project_name),
@@ -388,6 +632,7 @@ class MdFormatter:
         return header
 
     def make_files_listing(self, pathdescs):
+        """Generate simple file listing without line numbers (legacy method)."""
         files_lines = []
         for pathdesc in pathdescs:
             files_lines.append(f"`{pathdesc}`")

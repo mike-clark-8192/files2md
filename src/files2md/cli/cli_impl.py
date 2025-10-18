@@ -56,6 +56,13 @@ def file_sizes_and_names(summary: md_transform.TransformSummary) -> Iterable[str
 
 
 def main(argv: list[str] = sys.argv[1:]):
+    # Reconfigure stdout/stderr to use UTF-8 encoding to avoid encoding errors on Windows
+    # when outputting Unicode characters (especially when output is redirected/piped)
+    if sys.stdout is not None:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    if sys.stderr is not None:
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
     args = cli_args.parse(argv)
     files, applied_patterns = collect_paths(args)
     project_name = (
@@ -64,10 +71,13 @@ def main(argv: list[str] = sys.argv[1:]):
 
     if not args.split:
         transform = main_singlefile_output(args, files, project_name)
+        output_file_paths = [args.out_file]
+        output_file_size = args.out_file.stat().st_size
     else:
         transform = main_splitfile_output(args, files, project_name)
+        output_file_paths = transform.output_handler.get_filepaths()
+        output_file_size = sum(p.stat().st_size for p in output_file_paths)
 
-    output_file_size = args.out_file.stat().st_size
     with msg.VPrinter(args.verbosity) as vprint:
         summary = transform.summary
         vprint.section(2, "arguments", vars(args))
@@ -80,7 +90,7 @@ def main(argv: list[str] = sys.argv[1:]):
             {
                 "Number of files included": len(files),
                 "Output file size": output_file_size,
-                "Output file": args.out_file,
+                "Output files": output_file_paths if args.split else args.out_file,
             },
         )
 

@@ -48,6 +48,11 @@ def parse(argv: list[str]) -> Args:
         parser.error(f"{args.out_file} exists. Use -f to overwrite.")
     args.out_file = args.out_file.absolute()
 
+    # If no include rules were provided via -g, inject an implicit '**' rule
+    user_provided_include_rules_count = sum(1 for x in args.glob_patterns if not x.startswith("!"))
+    if user_provided_include_rules_count == 0:
+        args.glob_patterns.insert(0, "**")
+
     args.verbosity = args.verbosity - args.quietosity
 
     return args
