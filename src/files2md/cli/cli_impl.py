@@ -111,6 +111,7 @@ def main_splitfile_output(args: cli_args.Args, files: list[Path], project_name: 
         include_empty=args.include_empty,
         mlpf_approx_pct=args.mlpf_approx_pct,
         sub_rules_file=args.sub_rules_file,
+        binary_patterns=args.binary_patterns,
     )
     transform.make_md()
     return transform
@@ -128,6 +129,7 @@ def main_singlefile_output(args: cli_args.Args, files: list[Path], project_name:
             include_empty=args.include_empty,
             mlpf_approx_pct=args.mlpf_approx_pct,
             sub_rules_file=args.sub_rules_file,
+            binary_patterns=args.binary_patterns,
         )
         transform.make_md()
     return transform

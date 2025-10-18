@@ -10,6 +10,8 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Iterable, final, override
 import typing
 
+import pathspec
+
 import files2md
 import files2md.fileinfo as fileinfo
 
@@ -43,6 +45,14 @@ ${fence}${omission_msg}
 TEMPLATE_BINARY_FILE = Template(
     """### `${pathname}`
 (binary file detected, content excluded)
+"""
+)
+
+TEMPLATE_MARKED_BINARY_FILE = Template(
+    """
+### `${pathname}`
+(marked as binary file)
+
 """
 )
 
@@ -264,6 +274,7 @@ class MdWriter(contextlib.AbstractContextManager):
         files: list[Path],
         md_formatter: "MdFormatter | None" = None,
         sub_rules_file: str,
+        binary_patterns: list[str] | None = None,
     ):
         if isinstance(output, Path):
             output = open(output, "w", encoding="utf-8")
@@ -281,6 +292,7 @@ class MdWriter(contextlib.AbstractContextManager):
         self.tag_substr = self.make_tag_substr()
         self.total_chars_written = 0
         self.summary = TransformSummary()
+        self.binary_patterns = binary_patterns or []
 
         def build_md_formatter() -> MdFormatter:
             if md_formatter is not None:
@@ -291,6 +303,7 @@ class MdWriter(contextlib.AbstractContextManager):
                 max_lines_per_file=self.max_lines_per_file,
                 mlpf_approx_pct=self.mlpf_approx_pct,
                 sub_rules_file=sub_rules_file,
+                binary_patterns=self.binary_patterns,
             )
 
         self.mdfmt: MdFormatter = build_md_formatter()
@@ -556,13 +569,20 @@ class MdFormatter:
         max_lines_per_file: int,
         mlpf_approx_pct: int,
         sub_rules_file: str,
+        binary_patterns: list[str] | None = None,
     ):
         self.tag_str = tag_str
         self.exclude_empty = exclude_empty
         self.max_lines_per_file = max_lines_per_file
         self.mlpf_approx_pct = mlpf_approx_pct
         self.sub_rules_file = sub_rules_file
+        self.binary_patterns = binary_patterns or []
         self.compiled_sub_rules = self.compile_sub_rules()
+        self.binary_pathspec = (
+            pathspec.PathSpec.from_lines("gitwildmatch", self.binary_patterns)
+            if self.binary_patterns
+            else None
+        )
 
     def compile_sub_rules(self) -> list[TextSubstituter]:
         # Linewise comments are supported in the substitution rules file via the `#` character.
@@ -722,6 +742,14 @@ class MdFormatter:
         """
         truncated = False
         excluded = False
+
+        # Check if file matches binary patterns
+        if self.binary_pathspec and self.binary_pathspec.match_file(file):
+            truncated = False
+            excluded = False
+            mdchunk = TEMPLATE_MARKED_BINARY_FILE.substitute(pathname=pathname)
+            return mdchunk, truncated, excluded
+
         has_md_lang = fileinfo.FILEEXT_TO_MDLANG.get(file.suffix.lower(), False)
         if self.exclude_by_mime(file) and not has_md_lang:
             truncated = False

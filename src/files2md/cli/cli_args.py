@@ -9,6 +9,7 @@ import re
 
 class Args:
     autoname_output: bool
+    binary_patterns: list[str]
     exclude_patterns: list[str]
     first_pass: pathlib.Path
     force: bool
@@ -102,6 +103,15 @@ def build_argparser():
         default=[],
         metavar="GLOB",
         help="Wildmatch patterns to include files and directories.",
+    )
+    parser.add_argument(
+        "-B",
+        "--binary-patterns",
+        type=str,
+        nargs="+",
+        default=[],
+        metavar="GLOB",
+        help="Wildmatch patterns to match binary files. These files will be included in the output but without their content.",
     )
     parser.add_argument(
         "-x",
