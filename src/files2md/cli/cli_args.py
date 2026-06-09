@@ -9,25 +9,25 @@ import re
 
 class Args:
     autoname_output: bool
+    baseline: str
     binary_patterns: list[str]
-    exclude_patterns: list[str]
     first_pass: pathlib.Path
     force: bool
     git_ls_files: bool
     glob_patterns: list[str]
     in_dirs: list[pathlib.Path]
     include_empty: bool
+    include_sensitive: bool
     max_lines_per_file: int
     mlpf_approx_pct: int
     out_dir: pathlib.Path
     out_file: pathlib.Path
     output_encoding: str
     output_extension: str
-    use_default_patterns: bool
+    default_patterns: bool
     split: int
     sub_rules_file: str
     verbosity: int
-    quietosity: int
 
 def parse(argv: list[str]) -> Args:
     parser = build_argparser()
@@ -48,13 +48,6 @@ def parse(argv: list[str]) -> Args:
     if not args.force and args.out_file.exists():
         parser.error(f"{args.out_file} exists. Use -f to overwrite.")
     args.out_file = args.out_file.absolute()
-
-    # If no include rules were provided via -g, inject an implicit '**' rule
-    user_provided_include_rules_count = sum(1 for x in args.glob_patterns if not x.startswith("!"))
-    if user_provided_include_rules_count == 0:
-        args.glob_patterns.insert(0, "**")
-
-    args.verbosity = args.verbosity - args.quietosity
 
     return args
 
@@ -96,13 +89,31 @@ def build_argparser():
     add_output_options()
 
     parser.add_argument(
+        "--baseline",
+        choices=["all", "known", "none"],
+        default="all",
+        help="Starting set before patterns are applied: 'all' = include "
+        "everything (**); 'known' = include only recognised source/text file "
+        "types; 'none' = start empty and rely on --glob.",
+    )
+    parser.add_argument(
         "-g",
-        "--glob-patterns",
-        type=str,
+        "--glob",
+        dest="glob_patterns",
+        action="extend",
         nargs="+",
         default=[],
         metavar="GLOB",
-        help="Wildmatch patterns to include files and directories.",
+        help="Your include/exclude patterns, applied after the built-in sets so "
+        "they take precedence. Gitignore-style but inverted (same as ripgrep -g): "
+        "'PAT' includes, '!PAT' excludes. Repeatable; order is preserved.",
+    )
+    parser.add_argument(
+        "--include-sensitive",
+        action="store_true",
+        default=False,
+        help="Include sensitive files (.env, *.pem, id_rsa, ...) that are "
+        "otherwise always excluded last -- even by --glob '**'.",
     )
     parser.add_argument(
         "-B",
@@ -112,15 +123,6 @@ def build_argparser():
         default=[],
         metavar="GLOB",
         help="Wildmatch patterns to match binary files. These files will be included in the output but without their content.",
-    )
-    parser.add_argument(
-        "-x",
-        "--exclude-patterns",
-        type=str,
-        nargs="+",
-        default=[],
-        metavar="GLOB",
-        help="Wildmatch patterns to exclude files and directories.",
     )
     parser.add_argument(
         "-l",
@@ -144,12 +146,12 @@ def build_argparser():
         help="Include empty files in the output.",
     )
     parser.add_argument(
-        "-D",
-        "--no-default-patterns",
-        action="store_false",
+        "--default-patterns",
+        action=argparse.BooleanOptionalAction,
         default=True,
-        dest="use_default_patterns",
-        help="Turn off built-in include/exclude patterns.",
+        help="Apply the built-in everyday exclude sets (binary, vcs, generated, "
+        "noisy). Disable with --no-default-patterns. Sensitive-file exclusion is "
+        "separate and stays on regardless (see --include-sensitive).",
     )
     parser.add_argument(
         "--output-encoding",
@@ -161,18 +163,11 @@ def build_argparser():
     parser.add_argument(
         "-v",
         "--verbose",
-        action="count",
+        type=int,
         default=5,
         dest="verbosity",
-        help="Increase verbosity. Repeat for more output.",
-    )
-    parser.add_argument(
-        "-q",
-        "--quiet",
-        action="count",
-        default=0,
-        dest="quietosity",
-        help="Decrease verbosity. Repeat for less output.",
+        metavar="N",
+        help="Verbosity level; higher shows more (1 = summary only, 0 = silent).",
     )
     parser.add_argument(
         "-f",

@@ -447,12 +447,13 @@ class MdWriter(contextlib.AbstractContextManager):
                 self.output_handler.write(fp.content)
                 self.output_handler.on_after_md_section()
 
-            # Track summary for all files in this split
-            for file, _, truncated, excluded in split_file_data:
-                # Find the corresponding file position
-                for fp in local_positions:
-                    self.summary_track_file(file, fp.content, truncated, excluded)
-                    break
+            # Track summary for all files in this split. split_file_data and
+            # local_positions are parallel lists (same order), so zip pairs each
+            # file with its own generated content.
+            for (file, _, truncated, excluded), fp in zip(
+                split_file_data, local_positions
+            ):
+                self.summary_track_file(file, fp.content, truncated, excluded)
 
     def _partition_files_for_splits(
         self,
@@ -551,13 +552,10 @@ class RETextSubstituter(TextSubstituter):
     def __init__(self, pattern: str, repl: str):
         self.pattern = re.compile(pattern)
         self.repl = repl
-        print(f"RETextSubstituter {pattern=}, {repl=}")
 
     @override
     def substitute(self, s: str) -> str:
-        result = self.pattern.sub(self.repl, s)
-        print(f"RETextSubstituter {self.pattern=}, {self.repl=}, {s=}, {result=}")
-        return result
+        return self.pattern.sub(self.repl, s)
 
 
 class MdFormatter:

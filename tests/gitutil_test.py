@@ -14,11 +14,16 @@ def assert_same_paths(a: StrPathIter, b: StrPathIter):
     assert sa == sb
 
 
-def test_dir_find_dotgit_dirs():
-    search_dir = Path(".").absolute()
+def test_dir_find_dotgit_dirs(tmp_path):
+    # Two repos at different depths, each marked by a .git directory.
+    (tmp_path / "repoA" / ".git").mkdir(parents=True)
+    (tmp_path / "repoB" / "sub" / ".git").mkdir(parents=True)
+
+    # dir_find_dotgit_dirs returns the parent of each .git it finds.
     assert_same_paths(
-        gitutil.dir_find_dotgit_dirs(search_dir),
+        gitutil.dir_find_dotgit_dirs(tmp_path),
         [
-            ".",
+            tmp_path / "repoA",
+            tmp_path / "repoB" / "sub",
         ],
     )

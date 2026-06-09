@@ -12,6 +12,39 @@ from files2md.cli import cli_args, msg
 import files2md.cli.gitutil as gitutil
 
 
+def build_pattern_chain(args: cli_args.Args) -> list[str]:
+    """Assemble the ordered gitwildmatch pattern list (last match wins).
+
+    Layers, top to bottom:
+      0. baseline           -- ** / known-good includes / nothing
+      1. everyday excludes  -- binary, vcs, generated, noisy (unless --no-default-patterns)
+      2. user --glob        -- include/exclude, order preserved, user has precedence
+      3. sensitive excludes -- the last word, unless --include-sensitive
+    """
+    patterns: list[str] = []
+
+    # Layer 0: baseline
+    if args.baseline == "all":
+        patterns.append("**")
+    elif args.baseline == "known":
+        patterns.extend(fileinfo.KNOWN_GOOD_INCLUDES)
+    # "none": start empty, rely entirely on --glob
+
+    # Layer 1: everyday exclude sets
+    if args.default_patterns:
+        for set_name in fileinfo.EVERYDAY_EXCLUDE_SET_ORDER:
+            patterns.extend(f"!{p}" for p in fileinfo.EVERYDAY_EXCLUDE_SETS[set_name])
+
+    # Layer 2: user patterns (already gitignore-style; '!' = exclude)
+    patterns.extend(args.glob_patterns)
+
+    # Layer 3: sensitive files always have the last word, unless opted in
+    if not args.include_sensitive:
+        patterns.extend(f"!{p}" for p in fileinfo.SENSITIVE_EXCLUDES)
+
+    return patterns
+
+
 def collect_paths_git(
     args: cli_args.Args, patterns: list[str]
 ) -> tuple[list[Path], list[str]]:
@@ -22,26 +55,15 @@ def collect_paths_git(
 
 
 def collect_paths(args: cli_args.Args) -> tuple[list[Path], list[str]]:
-
-    use_default_patterns: bool = args.use_default_patterns
-    include_patterns: list[str] = args.glob_patterns
-    exclude_patterns: list[str] = args.exclude_patterns
-
-    patterns = []
-    if use_default_patterns:
-        patterns.extend(fileinfo.DEFAULT_PATTERNS)
-    exclude_patterns = [f"!{pattern}" for pattern in exclude_patterns]
-    patterns.extend(exclude_patterns)
-    patterns.extend(include_patterns)
+    patterns = build_pattern_chain(args)
 
     if args.git_ls_files:
         return collect_paths_git(args, patterns)
 
+    spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns)
     all_paths: list[Path] = []
     for in_dir in args.in_dirs:
-        spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns)
-        specced = [in_dir.joinpath(x) for x in spec.match_tree(in_dir)]
-        all_paths.extend(specced)
+        all_paths.extend(in_dir.joinpath(x) for x in spec.match_tree(in_dir))
     return all_paths, patterns
 
 

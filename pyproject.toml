@@ -21,5 +21,11 @@ files2md = "files2md.cli.__main__:main"
 [tool.pyright]
 exclude = ["build/**", ".venv/**"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# tests/a-test-repo is fixture data (a vendored copy of `tabulate`); its own
+# test suite must not be collected.
+norecursedirs = ["tests/a-test-repo"]
+
 [dependency-groups]
 dev = ["autoflake>=2.3.1", "debugpy>=1.8.17", "pytest>=8.4.2"]
