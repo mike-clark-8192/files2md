@@ -44,12 +44,29 @@ def parse(argv: list[str]) -> Args:
             parser.error("required: -O or [out_file]")
         ext = args.output_extension
         in_dir_names = "_".join(d.name for d in args.in_dirs)
-        args.out_file = Path(f"{in_dir_names}_md.{ext}").absolute()
-    if not args.force and args.out_file.exists():
-        parser.error(f"{args.out_file} exists. Use -f to overwrite.")
+        args.out_file = Path(f"{in_dir_names}_md.{ext}")
+    if args.out_dir is not None:
+        # --out-dir overrides the directory; the filename comes from -o / -O.
+        args.out_file = args.out_dir / args.out_file.name
     args.out_file = args.out_file.absolute()
+    if not args.force:
+        existing = first_output_path(args.out_file, args.split)
+        if existing.exists():
+            parser.error(f"{existing} exists. Use -f to overwrite.")
 
     return args
+
+
+def first_output_path(out_file: Path, split_kb: int) -> Path:
+    """The first file actually written, for the overwrite guard.
+
+    Single-file mode writes ``out_file`` itself. Split mode never writes that
+    base name -- it writes ``<stem>-1<suffix>``, ``<stem>-2<suffix>``, ... -- so
+    the first part is what we check.
+    """
+    if split_kb:
+        return out_file.parent / f"{out_file.stem}-1{out_file.suffix}"
+    return out_file
 
 
 def build_argparser():
@@ -70,6 +87,9 @@ def build_argparser():
             "-d",
             "--out-dir",
             type=ArgType.existing_dir,
+            metavar="DIR",
+            help="Directory to write output into; the filename comes from "
+            "-o / -O. Overrides the directory part of -o. Useful with --split.",
         )
         group = parser.add_mutually_exclusive_group(required=True)
         group.add_argument(
@@ -188,7 +208,8 @@ def build_argparser():
         "--first-pass",
         type=Path,
         metavar="FILE",
-        help="Write first-pass metadata to FILE.",
+        help="Also write a JSON manifest of the selected files (paths, line "
+        "ranges, sizes) to FILE -- a dry-run view for tuning --baseline/--glob.",
     )
     parser.add_argument(
         "-t",

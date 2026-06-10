@@ -1,12 +1,12 @@
-import argparse
-import os
+import dataclasses
+import json
 import sys
 from pathlib import Path
 from typing import Iterable
 
 import pathspec
-from pathspec.patterns.gitwildmatch import GitWildMatchPattern
 
+import files2md
 from files2md import fileinfo, md_transform
 from files2md.cli import cli_args, msg
 import files2md.cli.gitutil as gitutil
@@ -100,6 +100,11 @@ def main(argv: list[str] = sys.argv[1:]):
         output_file_paths = transform.output_handler.get_filepaths()
         output_file_size = sum(p.stat().st_size for p in output_file_paths)
 
+    if args.first_pass:
+        write_first_pass_manifest(
+            args.first_pass, args, transform, applied_patterns, output_file_paths
+        )
+
     with msg.VPrinter(args.verbosity) as vprint:
         summary = transform.summary
         vprint.section(2, "arguments", vars(args))
@@ -113,8 +118,45 @@ def main(argv: list[str] = sys.argv[1:]):
                 "Number of files included": len(files),
                 "Output file size": output_file_size,
                 "Output files": output_file_paths if args.split else args.out_file,
+                **(
+                    {"First-pass manifest": args.first_pass}
+                    if args.first_pass
+                    else {}
+                ),
             },
         )
+
+
+def write_first_pass_manifest(
+    path: Path,
+    args: cli_args.Args,
+    transform: md_transform.MdWriter,
+    applied_patterns: list[str],
+    output_file_paths: list[Path],
+) -> None:
+    """Write the pass-1 metadata as a JSON manifest.
+
+    A dry-run-style record of exactly what the current pattern set selected and
+    how large each piece is -- handy for tuning --baseline/--glob without
+    re-reading the generated document.
+    """
+    manifest = {
+        "files2md_version": files2md.__version__,
+        "project_name": transform.project_name,
+        "in_dirs": [str(d) for d in args.in_dirs],
+        "baseline": args.baseline,
+        "include_sensitive": args.include_sensitive,
+        "split_kb": args.split,
+        "applied_patterns": applied_patterns,
+        "output_files": [str(p) for p in output_file_paths],
+        "file_count": len(transform.first_pass_entries),
+        "total_chars": sum(e.chars for e in transform.first_pass_entries),
+        "suffix_counts": transform.summary.suffix_to_file_count,
+        "files": [dataclasses.asdict(e) for e in transform.first_pass_entries],
+    }
+    with open(path, "w", encoding=args.output_encoding) as fh:
+        json.dump(manifest, fh, indent=2)
+        fh.write("\n")
 
 
 def main_splitfile_output(args: cli_args.Args, files: list[Path], project_name: str):

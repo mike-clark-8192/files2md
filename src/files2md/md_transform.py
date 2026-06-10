@@ -124,6 +124,19 @@ class FilePosition:
     content: str            # Generated markdown for this file
 
 
+@dataclass
+class FirstPassEntry:
+    """One file's record in the --first-pass manifest (see cli_impl)."""
+    path: str               # descriptive path as shown in the document
+    abs_path: str           # absolute filesystem path
+    start_line: int         # first line of this file's section in the output
+    end_line: int           # last line of this file's section
+    chars: int              # length of the generated markdown chunk
+    truncated: bool         # content truncated by --max-lines-per-file
+    content_excluded: bool  # content excluded (binary / unsupported MIME)
+    split_index: int | None = None  # which split file (split mode only)
+
+
 @dataclass(kw_only=True)
 class TransformSummary:
     # files that were truncated due to max_lines_per_file
@@ -292,6 +305,7 @@ class MdWriter(contextlib.AbstractContextManager):
         self.tag_substr = self.make_tag_substr()
         self.total_chars_written = 0
         self.summary = TransformSummary()
+        self.first_pass_entries: list[FirstPassEntry] = []
         self.binary_patterns = binary_patterns or []
 
         def build_md_formatter() -> MdFormatter:
@@ -363,8 +377,19 @@ class MdWriter(contextlib.AbstractContextManager):
             file_positions.append(FilePosition(pathdesc, start_line, end_line, mdstr))
             current_line = end_line + 1
 
-            # Track for summary
+            # Track for summary and the first-pass manifest
             self.summary_track_file(file, mdstr, truncated, excluded)
+            self.first_pass_entries.append(
+                FirstPassEntry(
+                    path=pathdesc,
+                    abs_path=str(file),
+                    start_line=start_line,
+                    end_line=end_line,
+                    chars=len(mdstr),
+                    truncated=truncated,
+                    content_excluded=excluded,
+                )
+            )
 
         # Step 4: Generate real TOC with calculated positions
         toc = self.mdfmt.make_files_listing_with_lines(file_positions)
@@ -410,7 +435,7 @@ class MdWriter(contextlib.AbstractContextManager):
         splits = self._partition_files_for_splits(all_file_data, header_prefix, split_handler.kb_per_file)
 
         # Step 4: For each split, generate TOC with local line numbers and write
-        for split_file_data in splits:
+        for split_index, split_file_data in enumerate(splits, start=1):
             # Extract just the FilePositions for this split
             split_fps = [fp for _, fp, _, _ in split_file_data]
 
@@ -447,13 +472,25 @@ class MdWriter(contextlib.AbstractContextManager):
                 self.output_handler.write(fp.content)
                 self.output_handler.on_after_md_section()
 
-            # Track summary for all files in this split. split_file_data and
-            # local_positions are parallel lists (same order), so zip pairs each
-            # file with its own generated content.
+            # Track summary and manifest for all files in this split.
+            # split_file_data and local_positions are parallel lists (same
+            # order), so zip pairs each file with its own generated content.
             for (file, _, truncated, excluded), fp in zip(
                 split_file_data, local_positions
             ):
                 self.summary_track_file(file, fp.content, truncated, excluded)
+                self.first_pass_entries.append(
+                    FirstPassEntry(
+                        path=fp.path_desc,
+                        abs_path=str(file),
+                        start_line=fp.start_line,
+                        end_line=fp.end_line,
+                        chars=len(fp.content),
+                        truncated=truncated,
+                        content_excluded=excluded,
+                        split_index=split_index,
+                    )
+                )
 
     def _partition_files_for_splits(
         self,

@@ -73,6 +73,24 @@ files2md ./project --baseline none -g 'src/**' '!**/test_*.py' -o out.md
 
 See **[PATTERNS.md](PATTERNS.md)** for the full model and more examples.
 
+To inspect exactly what a pattern set selects (and how big each piece is)
+without combing through the generated document, add `-1/--first-pass FILE` to
+also emit a JSON manifest of the selected files with their line ranges and
+sizes.
+
+## Splitting large output
+
+`-p/--split KB` writes the document across multiple parts of roughly `KB`
+kilobytes each, named `<stem>-1<suffix>`, `<stem>-2<suffix>`, … next to your
+`-o` path (each part is self-contained, with its own per-part table of
+contents). Use `-d/--out-dir DIR` to collect the parts in a dedicated
+directory:
+
+```sh
+files2md ./project -o project.md -p 200 -d ./dump
+# -> ./dump/project-1.md, ./dump/project-2.md, ...
+```
+
 ## Wishlist / TODOs
 
 * Add support for direct installation via PyPI.
@@ -101,7 +119,9 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
-  -d, --out-dir OUT_DIR
+  -d, --out-dir DIR     Directory to write output into; the filename comes
+                        from -o / -O. Overrides the directory part of -o.
+                        Useful with --split. (default: None)
   -o, --out-file OUT_FILE
                         Output file. (default: None)
   -O, --autoname-output
@@ -143,6 +163,10 @@ options:
                         Force overwrite output file(s). (default: False)
   --output-extension EXT
                         Output file extension. (default: txt)
+  -1, --first-pass FILE
+                        Also write a JSON manifest of the selected files
+                        (paths, line ranges, sizes) to FILE -- a dry-run view
+                        for tuning --baseline/--glob. (default: None)
   -t, --git-ls-files, --no-git-ls-files
                         Use 'git ls-files' to list files in input directories.
                         (default: False)
